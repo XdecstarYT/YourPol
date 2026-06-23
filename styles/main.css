@@ -1,0 +1,222 @@
+/* Australia: The Ultimate Political Simulator — UI styling
+   Visual language inspired by Lawgivers II: muted grey chrome,
+   coloured metric chips, map/chamber centre stage. */
+
+:root {
+  --bg: #2b2f33;
+  --chrome: #d9dde1;
+  --chrome-dark: #b9c0c6;
+  --chrome-darker: #9aa3aa;
+  --panel: #eef1f3;
+  --ink: #23282c;
+  --ink-soft: #5a636b;
+  --accent: #2f7dd1;
+  --good: #3fa65a;
+  --warn: #e0a83a;
+  --bad: #d65441;
+  --line: #c7ced3;
+
+  /* party colours */
+  --labor: #d6322f;
+  --liberal: #1f4ea1;
+  --nationals: #0a6b3b;
+  --greens: #3fa65a;
+  --onenation: #f08a24;
+  --teal: #0aa9a0;
+  --ind: #8a8f94;
+}
+
+* { box-sizing: border-box; }
+
+html, body {
+  margin: 0;
+  height: 100%;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: "Segoe UI", system-ui, -apple-system, Roboto, Helvetica, Arial, sans-serif;
+  font-size: 14px;
+  overflow: hidden;
+  user-select: none;
+}
+
+/* ---------- Top bar ---------- */
+#topbar {
+  position: fixed; top: 0; left: 0; right: 0; height: 40px;
+  background: linear-gradient(#3a4046, #2f343a);
+  color: #e8edf1;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 12px; z-index: 50;
+  border-bottom: 1px solid #1c2024;
+}
+#topbar .tb-left { display: flex; align-items: center; gap: 8px; font-weight: 600; }
+#topbar .tb-center { display: flex; gap: 14px; }
+#topbar .stat { font-variant-numeric: tabular-nums; font-size: 13px; }
+.role-chip {
+  background: var(--accent); color: #fff; border-radius: 10px;
+  padding: 3px 10px; font-size: 12px; font-weight: 600;
+}
+.flag { font-size: 16px; }
+
+/* ---------- Layout ---------- */
+#layout {
+  position: fixed; top: 40px; bottom: 44px; left: 48px; right: 0;
+  display: grid;
+  grid-template-columns: 250px 1fr 300px;
+  gap: 6px; padding: 6px;
+}
+
+.panel {
+  background: var(--panel);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  display: flex; flex-direction: column;
+  overflow: hidden;
+}
+.panel-title {
+  background: var(--chrome);
+  border-bottom: 1px solid var(--line);
+  padding: 8px 10px; font-weight: 700; font-size: 13px;
+  display: flex; align-items: center; gap: 6px;
+  flex: 0 0 auto;
+}
+#metrics-list, #ctx-body { overflow-y: auto; padding: 6px; flex: 1 1 auto; }
+
+/* ---------- Metric rows ---------- */
+.metric {
+  display: grid; grid-template-columns: 1fr auto;
+  align-items: center; gap: 6px;
+  padding: 6px 8px; margin-bottom: 4px;
+  background: #fff; border: 1px solid var(--line); border-radius: 6px;
+}
+.metric .m-name { font-size: 12px; color: var(--ink-soft); }
+.metric .m-val { font-weight: 700; font-variant-numeric: tabular-nums; }
+.metric .m-bar {
+  grid-column: 1 / -1; height: 5px; border-radius: 3px;
+  background: #dfe4e7; overflow: hidden; margin-top: 2px;
+}
+.metric .m-fill { height: 100%; border-radius: 3px; transition: width .4s ease; }
+.m-up { color: var(--good); } .m-down { color: var(--bad); }
+
+/* ---------- Stage / center ---------- */
+#stage {
+  background: linear-gradient(#cfe6f5, #a9d2ec);
+  border: 1px solid var(--line); border-radius: 8px;
+  overflow: hidden; position: relative;
+}
+#view-root { position: absolute; inset: 0; overflow: auto; }
+
+/* Map view */
+.map-wrap { display:flex; flex-direction:column; height:100%; }
+.map-grid {
+  flex: 1 1 auto; display: grid; gap: 8px; padding: 14px;
+  grid-template-columns: repeat(3, 1fr);
+  grid-auto-rows: minmax(70px, auto);
+  align-content: center;
+}
+.state-tile {
+  background: rgba(255,255,255,.82); border: 2px solid #fff; border-radius: 8px;
+  padding: 8px 10px; cursor: pointer; transition: transform .1s, box-shadow .1s;
+  box-shadow: 0 1px 3px rgba(0,0,0,.15);
+}
+.state-tile:hover { transform: translateY(-2px); box-shadow: 0 4px 10px rgba(0,0,0,.2); }
+.state-tile .st-name { font-weight: 700; font-size: 13px; }
+.state-tile .st-sub { font-size: 11px; color: var(--ink-soft); }
+.state-tile .st-bar { height: 6px; border-radius: 3px; margin-top: 6px; background:#e2e7ea; overflow:hidden;}
+.state-tile .st-fill { height:100%; }
+
+/* Parliament chamber */
+.chamber { padding: 16px; }
+.chamber h3 { margin: 4px 0 10px; }
+.seats { display: flex; flex-wrap: wrap; gap: 3px; max-width: 760px; }
+.seat {
+  width: 14px; height: 14px; border-radius: 50%;
+  border: 1px solid rgba(0,0,0,.2);
+}
+.gov-line { margin: 10px 0; font-size: 13px; }
+
+/* Generic view content */
+.view-pad { padding: 16px; color: var(--ink); background:#f4f7f9; min-height:100%; }
+.view-pad h2 { margin: 0 0 4px; }
+.view-pad h3 { margin: 18px 0 8px; border-bottom: 2px solid var(--line); padding-bottom: 4px; }
+.muted { color: var(--ink-soft); font-size: 12px; }
+
+table.data { border-collapse: collapse; width: 100%; font-size: 13px; background:#fff; }
+table.data th, table.data td { border: 1px solid var(--line); padding: 5px 8px; text-align: left; }
+table.data th { background: var(--chrome); }
+table.data tr:nth-child(even) td { background: #f7f9fa; }
+.tag { display:inline-block; padding:1px 7px; border-radius:9px; color:#fff; font-size:11px; font-weight:600; }
+
+.card {
+  background:#fff; border:1px solid var(--line); border-radius:8px;
+  padding:12px; margin-bottom:10px;
+}
+.row-between { display:flex; justify-content:space-between; align-items:center; gap:10px; }
+.grid2 { display:grid; grid-template-columns: 1fr 1fr; gap:10px; }
+.grid3 { display:grid; grid-template-columns: repeat(3,1fr); gap:10px; }
+
+.btn {
+  background: var(--accent); color:#fff; border:none; border-radius:6px;
+  padding:7px 12px; cursor:pointer; font-size:13px; font-weight:600;
+}
+.btn:hover { filter:brightness(1.08); }
+.btn:disabled { background: var(--chrome-darker); cursor:not-allowed; }
+.btn.secondary { background:#6b7780; }
+.btn.good { background: var(--good); }
+.btn.bad { background: var(--bad); }
+.btn.small { padding:4px 9px; font-size:12px; }
+
+input[type=range] { width: 100%; }
+.slider-row { margin: 8px 0; }
+.slider-row label { display:flex; justify-content:space-between; font-size:12px; margin-bottom:2px; }
+
+/* ---------- View rail ---------- */
+#viewrail {
+  position: fixed; top: 40px; bottom: 44px; left: 0; width: 48px;
+  background: #34393f; display: flex; flex-direction: column; align-items: center;
+  padding-top: 6px; gap: 4px; z-index: 40; border-right:1px solid #1c2024;
+}
+.rail-btn {
+  width: 38px; height: 38px; border: none; border-radius: 8px;
+  background: #434a51; color: #fff; font-size: 17px; cursor: pointer;
+}
+.rail-btn:hover { background: #525a62; }
+.rail-btn.active { background: var(--accent); }
+
+/* ---------- Control bar ---------- */
+#controlbar {
+  position: fixed; bottom: 0; left: 0; right: 0; height: 44px;
+  background: linear-gradient(#3a4046, #2f343a); color: #e8edf1;
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 0 12px; z-index: 50; border-top:1px solid #1c2024;
+}
+#controlbar button {
+  background:#434a51; color:#fff; border:none; border-radius:6px;
+  width:32px; height:30px; cursor:pointer; font-size:15px;
+}
+#controlbar button:hover { background:#525a62; }
+.cb-center { display:flex; align-items:center; gap:6px; }
+.time-btn.active { background: var(--accent); }
+.speed-group { display:flex; gap:3px; margin-left:6px; }
+.speed-btn { width:30px !important; font-weight:700; }
+.speed-btn.active { background: var(--accent); }
+.date { margin-left:12px; font-weight:700; font-variant-numeric: tabular-nums; min-width:90px; }
+.ticker { font-size:12px; color:#cfd6db; max-width:340px; overflow:hidden; white-space:nowrap; text-overflow:ellipsis; }
+
+/* ---------- Modal ---------- */
+#modal-host.hidden { display:none; }
+#modal-host { position:fixed; inset:0; z-index:100; display:flex; align-items:center; justify-content:center; }
+#modal-backdrop { position:absolute; inset:0; background:rgba(0,0,0,.5); }
+#modal-card {
+  position:relative; background:var(--panel); border-radius:10px; width:min(560px,92vw);
+  max-height:86vh; display:flex; flex-direction:column; box-shadow:0 10px 40px rgba(0,0,0,.4);
+  overflow:hidden;
+}
+.modal-title { background:var(--chrome); padding:12px 16px; font-weight:700; font-size:15px; }
+.modal-body { padding:16px; overflow-y:auto; }
+.modal-actions { padding:12px 16px; border-top:1px solid var(--line); display:flex; gap:8px; justify-content:flex-end; flex-wrap:wrap; }
+
+/* misc */
+.hidden { display:none !important; }
+.spacer { flex:1 1 auto; }
+::-webkit-scrollbar { width:9px; height:9px; }
+::-webkit-scrollbar-thumb { background:var(--chrome-darker); border-radius:5px; }

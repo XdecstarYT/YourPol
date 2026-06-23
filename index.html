@@ -1,0 +1,96 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Australia: The Ultimate Political Simulator</title>
+  <link rel="stylesheet" href="styles/main.css" />
+</head>
+<body>
+  <!-- Top status bar -->
+  <header id="topbar">
+    <div class="tb-left">
+      <span class="flag" title="Commonwealth of Australia">🇦🇺</span>
+      <span id="tb-nation">Commonwealth of Australia</span>
+    </div>
+    <div class="tb-center" id="tb-stats">
+      <span class="stat" id="tb-approval" title="Government approval">👍 —</span>
+      <span class="stat" id="tb-gdp" title="GDP">💰 —</span>
+      <span class="stat" id="tb-balance" title="Budget balance">📊 —</span>
+      <span class="stat" id="tb-unemp" title="Unemployment">🧑‍🏭 —</span>
+      <span class="stat" id="tb-debt" title="Net debt">🏦 —</span>
+    </div>
+    <div class="tb-right">
+      <span id="tb-role" class="role-chip">—</span>
+    </div>
+  </header>
+
+  <!-- Main layout -->
+  <div id="layout">
+    <!-- Left: national metrics panel (Lawgivers-style) -->
+    <aside id="metrics-panel" class="panel">
+      <div class="panel-title">
+        <span class="flag">🇦🇺</span>
+        <span>Australia</span>
+      </div>
+      <div id="metrics-list"><!-- metric rows injected --></div>
+    </aside>
+
+    <!-- Center: main view (map / parliament / election / etc.) -->
+    <main id="stage">
+      <div id="view-root"><!-- active view injected --></div>
+    </main>
+
+    <!-- Right: context panel (info / actions) -->
+    <aside id="context-panel" class="panel">
+      <div class="panel-title"><span id="ctx-title">Overview</span></div>
+      <div id="ctx-body"><!-- contextual content injected --></div>
+    </aside>
+  </div>
+
+  <!-- View switcher (left rail) -->
+  <nav id="viewrail">
+    <button class="rail-btn active" data-view="dashboard" title="National Dashboard">📋</button>
+    <button class="rail-btn" data-view="parliament" title="Parliament">🏛️</button>
+    <button class="rail-btn" data-view="elections" title="Elections">🗳️</button>
+    <button class="rail-btn" data-view="legislation" title="Legislation">⚖️</button>
+    <button class="rail-btn" data-view="budget" title="Budget & Tax">💵</button>
+    <button class="rail-btn" data-view="parties" title="Parties">👥</button>
+    <button class="rail-btn" data-view="career" title="Your Career">🎖️</button>
+    <button class="rail-btn" data-view="history" title="Historical Archive">📜</button>
+  </nav>
+
+  <!-- Bottom control bar (time controls) -->
+  <footer id="controlbar">
+    <div class="cb-left">
+      <button id="btn-save" title="Save game">💾</button>
+      <button id="btn-load" title="Load game">📂</button>
+    </div>
+    <div class="cb-center">
+      <button id="btn-pause" class="time-btn" title="Pause">⏸</button>
+      <button id="btn-play" class="time-btn active" title="Play">▶</button>
+      <div class="speed-group">
+        <button class="speed-btn" data-speed="1" title="Slow">»</button>
+        <button class="speed-btn active" data-speed="2" title="Normal">»»</button>
+        <button class="speed-btn" data-speed="4" title="Fast">»»»</button>
+      </div>
+      <span id="cb-date" class="date">Jan 2026</span>
+    </div>
+    <div class="cb-right">
+      <span id="cb-ticker" class="ticker">Welcome, Australia.</span>
+    </div>
+  </footer>
+
+  <!-- Modal host -->
+  <div id="modal-host" class="hidden">
+    <div id="modal-backdrop"></div>
+    <div id="modal-card">
+      <div id="modal-title" class="modal-title"></div>
+      <div id="modal-body" class="modal-body"></div>
+      <div id="modal-actions" class="modal-actions"></div>
+    </div>
+  </div>
+
+  <script type="module" src="src/main.js"></script>
+</body>
+</html>
