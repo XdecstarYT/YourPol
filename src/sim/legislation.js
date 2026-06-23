@@ -50,20 +50,62 @@ export const POLICY_CATALOGUE = [
     impact: { economy: +1 }, flag: 'nuclearLegal' },
 ];
 
-export function makeBill(state, policyId, sponsorPolId) {
-  const pol = POLICY_CATALOGUE.find((p) => p.id === policyId);
-  if (!pol) return null;
-  const bill = {
-    id: uid('bill'),
-    policyId,
-    title: pol.title,
-    desc: pol.desc,
-    econ: pol.econ, soc: pol.soc,
-    sponsor: sponsorPolId,
-    stage: 'house',     // house → senate → assent → enacted/failed
-    introduced: state.tick,
-    votes: {},
+// Policy areas the player can draft a custom bill in. Each maps an intensity
+// (1–10) to metric impacts, a budget line and an ideological position.
+export const BILL_CATEGORIES = [
+  { id: 'health',    name: 'Healthcare',     icon: '🏥', metric: 'health',       line: 'health',        econ: -0.4, soc: -0.2, costPer: 1.6 },
+  { id: 'education', name: 'Education',      icon: '🎓', metric: 'education',    line: 'education',      econ: -0.4, soc: -0.2, costPer: 1.3 },
+  { id: 'housing',   name: 'Housing',        icon: '🏠', metric: 'housing',      line: 'housing',        econ: -0.4, soc: -0.3, costPer: 1.8 },
+  { id: 'environ',   name: 'Environment',    icon: '🌿', metric: 'environment', line: 'climate',        econ: -0.3, soc: -0.5, costPer: 1.5 },
+  { id: 'safety',    name: 'Law & Order',    icon: '🛡️', metric: 'safety',       line: 'policing',       econ: +0.2, soc: +0.6, costPer: 0.9, side: { freedom: -0.5 } },
+  { id: 'transport', name: 'Infrastructure', icon: '🚆', metric: 'transport',    line: 'infrastructure', econ: 0.0,  soc: -0.1, costPer: 1.7 },
+  { id: 'defence',   name: 'Defence',        icon: '⚔️', metric: 'safety',       line: 'defence',        econ: +0.3, soc: +0.5, costPer: 2.0, side: { institutions: +0.3 } },
+  { id: 'welfare',   name: 'Welfare',        icon: '🤝', metric: 'happiness',    line: 'welfare',        econ: -0.6, soc: -0.4, costPer: 2.2 },
+  { id: 'science',   name: 'Science & R&D',  icon: '🔬', metric: 'education',    line: 'science',        econ: -0.1, soc: -0.3, costPer: 1.2, side: { economy: +0.4 } },
+  { id: 'integrity', name: 'Integrity',      icon: '⚖️', metric: 'institutions', line: null,             econ: 0.0,  soc: -0.2, costPer: 0.4 },
+];
+
+// Build the effect bundle for a custom bill from a category + intensity (1–10).
+export function customEffect(categoryId, intensity) {
+  const cat = BILL_CATEGORIES.find((c) => c.id === categoryId) || BILL_CATEGORIES[0];
+  const i = clamp(intensity, 1, 10);
+  const impact = { [cat.metric]: Math.round(i * 1.1) };
+  for (const [k, v] of Object.entries(cat.side || {})) impact[k] = Math.round(v * i);
+  return {
+    impact,
+    ongoing: { [cat.metric]: +(i * 0.25).toFixed(1) },
+    line: cat.line, cost: cat.line ? +(cat.costPer * i).toFixed(1) : 0,
+    econ: cat.econ, soc: cat.soc, category: cat.id,
   };
+}
+
+// Resolve the effect bundle for a bill or law (catalogue entry or custom).
+export function effectOf(obj) {
+  if (obj.custom) return obj.custom;
+  return POLICY_CATALOGUE.find((p) => p.id === obj.policyId) || {};
+}
+
+export function makeBill(state, policyId, sponsorPolId, opts = {}) {
+  let bill;
+  if (opts.custom) {
+    const eff = opts.custom;
+    bill = {
+      id: uid('bill'), policyId: null, custom: eff,
+      title: opts.title || 'Private Member\'s Bill',
+      desc: opts.desc || 'A bill drafted by its sponsor.',
+      econ: eff.econ ?? 0, soc: eff.soc ?? 0,
+      sponsor: sponsorPolId, stage: 'house', introduced: state.tick,
+      privateMember: !!opts.privateMember, votes: {},
+    };
+  } else {
+    const pol = POLICY_CATALOGUE.find((p) => p.id === policyId);
+    if (!pol) return null;
+    bill = {
+      id: uid('bill'), policyId, title: pol.title, desc: pol.desc,
+      econ: pol.econ, soc: pol.soc, sponsor: sponsorPolId,
+      stage: 'house', introduced: state.tick, votes: {},
+    };
+  }
   state.bills.push(bill);
   archive(state, `Bill introduced: ${bill.title}.`, 'bill');
   return bill;
@@ -119,7 +161,7 @@ function failBill(state, bill, reason) {
 }
 
 function enactBill(state, bill) {
-  const pol = POLICY_CATALOGUE.find((p) => p.id === bill.policyId);
+  const pol = effectOf(bill);
   // immediate metric impacts
   for (const [k, v] of Object.entries(pol.impact || {})) {
     if (k in state.metrics) state.metrics[k] = clamp(state.metrics[k] + v);
@@ -133,7 +175,7 @@ function enactBill(state, bill) {
   // special flags (e.g. legalising nuclear power)
   if (pol.flag === 'nuclearLegal' && state.energy) state.energy.nuclearLegal = true;
   const law = {
-    id: uid('law'), title: bill.title, policyId: bill.policyId,
+    id: uid('law'), title: bill.title, policyId: bill.policyId, custom: bill.custom || null,
     enacted: state.tick, ongoing: pol.ongoing || null, repealable: true,
   };
   state.laws.push(law);
@@ -145,7 +187,7 @@ function enactBill(state, bill) {
 export function repealLaw(state, lawId) {
   const law = state.laws.find((l) => l.id === lawId);
   if (!law) return;
-  const pol = POLICY_CATALOGUE.find((p) => p.id === law.policyId);
+  const pol = effectOf(law);
   if (pol) {
     if (pol.line && pol.cost) state.budget.spend[pol.line] = Math.max(0, state.budget.spend[pol.line] - pol.cost);
     for (const [k, v] of Object.entries(pol.taxDelta || {})) {

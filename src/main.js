@@ -3,7 +3,7 @@
 
 import { saveGame, loadGame, hasSave, clamp } from './engine.js';
 import { newGame, tick, polById } from './sim/index.js';
-import { makeBill, advanceBill, repealLaw } from './sim/legislation.js';
+import { makeBill, advanceBill, repealLaw, customEffect } from './sim/legislation.js';
 import { runElection } from './sim/elections.js';
 import { resolveEvent, playerGoverns } from './sim/events.js';
 import { runAction } from './sim/career.js';
@@ -14,35 +14,42 @@ import { initUI, render, closeModal, modal, showElectionNight,
 import { sfx } from './audio.js';
 
 let state = null;
-let timer = null;
+let autoTimer = null;
 
-// Real-time mapping: speed 1/2/4 → milliseconds per simulated month.
-const SPEED_MS = { 1: 2000, 2: 1000, 4: 450 };
+// The game is TURN-BASED: one turn = one month. The player advances time with
+// "End Turn" / "End Year". An optional Auto mode advances turns on a timer.
+const SPEED_MS = { 1: 1400, 2: 800, 4: 380 };
 
-/* ----------------------------------------------------------------- loop */
-function startLoop() {
-  stopLoop();
-  if (state.paused) return;
-  timer = setInterval(stepOnce, SPEED_MS[state.speed] || 1000);
+function startAuto() {
+  stopAuto();
+  if (!state.auto) return;
+  autoTimer = setInterval(advanceTurn, SPEED_MS[state.speed] || 800);
 }
-function stopLoop() { if (timer) { clearInterval(timer); timer = null; } }
+function stopAuto() { if (autoTimer) { clearInterval(autoTimer); autoTimer = null; } }
 
-function stepOnce() {
+// Advance a single turn. Returns a status; halts auto-play on anything notable.
+function stepTurn() {
+  if (state.events.length) return 'blocked';     // unresolved crisis
   const out = tick(state);
   if (out.achievements?.length) announceAchievements(out.achievements);
-  if (out.election) onElection(out.election);
-  // pause for player crisis decisions
+  if (out.election) { onElection(out.election); return 'election'; }
   if (state.events.length) {
-    state.paused = true; stopLoop();
     sfx('alert');
     const ev = state.events[0];
-    toast(`${ev.icon} ${ev.title}`, 'A crisis demands your decision.', 'bad');
+    toast(`${ev.icon} ${ev.title}`, 'A crisis needs your decision.', 'bad');
+    return 'crisis';
   }
+  return 'ok';
+}
+function advanceTurn() {
+  const s = stepTurn();
+  if (s !== 'ok') { stopAuto(); state.auto = false; }
   render(state);
+  return s;
 }
 
 function onElection(result) {
-  state.paused = true; stopLoop();
+  stopAuto(); state.auto = false;
   sfx('election');
   showElectionNight(state, result, () => render(state));
 }
@@ -50,13 +57,20 @@ function onElection(result) {
 /* ------------------------------------------------------------------ api */
 const api = {
   state: () => state,
-  setPaused(p) { state.paused = p; p ? stopLoop() : startLoop(); render(state); },
-  setSpeed(s) { state.speed = s; if (!state.paused) startLoop(); render(state); },
+  // turn controls
+  endTurn() { sfx('click'); advanceTurn(); },
+  endYear() {
+    sfx('click');
+    for (let i = 0; i < 12; i++) { if (stepTurn() !== 'ok') break; }
+    stopAuto(); state.auto = false; render(state);
+  },
+  toggleAuto() { state.auto = !state.auto; sfx('click'); state.auto ? startAuto() : stopAuto(); render(state); },
+  setSpeed(s) { state.speed = s; if (state.auto) startAuto(); render(state); },
 
-  save() { state.paused = true; stopLoop(); saveGame(state); render(state); },
+  save() { stopAuto(); state.auto = false; saveGame(state); render(state); },
   load() {
     const loaded = loadGame();
-    if (loaded) { state = loaded; state.paused = true; stopLoop(); render(state); }
+    if (loaded) { state = loaded; state.auto = false; stopAuto(); render(state); }
   },
 
   callElection() {
@@ -68,20 +82,35 @@ const api = {
   },
 
   // legislation -----------------------------------------------------------
-  canLegislate() {
+  canLegislate() {        // member of government: budget, repeal, referendums
     const pl = state.player;
     if (!pl || !pl.polId) return false;
     const pol = polById(state, pl.polId);
     return pol && ['minister', 'treasurer', 'leader', 'pm'].includes(pol.rank)
       && state.gov.parties.includes(pol.party);
   },
+  canIntroduce() {        // any sitting MP can introduce a bill
+    return !!(state.player && state.player.polId);
+  },
   proposePolicy(policyId) {
-    if (!api.canLegislate()) return;
+    if (!api.canIntroduce()) return;
     const bill = makeBill(state, policyId, state.player.polId);
-    if (bill) bill.sponsoredByGov = true;
+    if (bill) bill.sponsoredByGov = api.canLegislate();
     sfx('click'); render(state);
   },
+  proposeCustom({ title, category, intensity }) {
+    if (!api.canIntroduce()) return;
+    const eff = customEffect(category, intensity);
+    const bill = makeBill(state, null, state.player.polId, {
+      custom: eff, title: title || 'Private Member\'s Bill',
+      desc: `A bill in the area of ${category} (strength ${intensity}/10).`,
+      privateMember: !api.canLegislate(),
+    });
+    if (bill) bill.sponsoredByGov = api.canLegislate();
+    sfx('success'); render(state);
+  },
   advanceBill(billId) {
+    if (!api.canIntroduce()) return;
     const b = state.bills.find((x) => x.id === billId);
     if (b) { const was = state.laws.length; advanceBill(state, b); sfx(state.laws.length > was ? 'law' : 'gavel'); }
     render(state);
@@ -102,15 +131,15 @@ const api = {
     sfx((state.player?.reputation ?? 0) >= before ? 'success' : 'fail');
     render(state);
   },
-  openMenu() { state.paused = true; stopLoop(); render(state); openMainMenu(); },
+  openMenu() { state.auto = false; stopAuto(); render(state); openMainMenu(); },
 };
 
 /* -------------------------------------------------------------- bootstrap */
 function openMainMenu() {
   showMainMenu({
     hasSave: hasSave(),
-    onStart: (opts) => { hideMenu(); state = newGame({ ...opts }); state.paused = true; render(state); },
-    onResume: () => { const l = loadGame(); if (l) { state = l; } hideMenu(); state.paused = true; render(state); },
+    onStart: (opts) => { hideMenu(); state = newGame({ ...opts }); state.auto = false; render(state); },
+    onResume: () => { const l = loadGame(); if (l) { state = l; } hideMenu(); state.auto = false; render(state); },
   });
 }
 function boot() {

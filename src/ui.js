@@ -12,7 +12,24 @@ import {
 import { POLICY_CATALOGUE } from './sim/legislation.js';
 import { sfx, configureAudio, getAudioSettings, startMusic, unlockAudio } from './audio.js';
 import { lineChart, donut } from './charts.js';
+import { buildAusMap } from './ausmap.js';
 import { DIFFICULTIES } from './data.js';
+import { BILL_CATEGORIES, customEffect, effectOf } from './sim/legislation.js';
+
+// Leading party among a state's electorates (for colouring the map).
+function stateLeadParty(state, code) {
+  const seats = state.electorates.filter((e) => e.state === code);
+  if (!seats.length) return state.stateGovs?.[code]?.party || 'ind';
+  const tally = {};
+  seats.forEach((e) => (tally[e.held] = (tally[e.held] || 0) + 1));
+  // coalition counts together for colour purposes
+  const coal = (tally.lib || 0) + (tally.nat || 0);
+  let best = 'ind', bestN = 0;
+  for (const [p, n] of Object.entries(tally)) if (n > bestN) { best = p; bestN = n; }
+  if (coal >= bestN) best = 'lib';
+  return best;
+}
+function partyColour(id) { return partyById(id)?.colour || '#8a8f94'; }
 
 let API = null;
 let VIEW = 'dashboard';
@@ -60,8 +77,9 @@ function wireChrome() {
   document.addEventListener('pointerdown', unlockAudio, { once: true });
   document.querySelectorAll('.rail-btn').forEach((b) =>
     b.addEventListener('click', () => { sfx('tab'); setView(b.dataset.view); }));
-  $('#btn-play').addEventListener('click', () => { sfx('click'); API.setPaused(false); });
-  $('#btn-pause').addEventListener('click', () => { sfx('click'); API.setPaused(true); });
+  $('#btn-endturn').addEventListener('click', () => API.endTurn());
+  $('#btn-endyear').addEventListener('click', () => API.endYear());
+  $('#btn-auto').addEventListener('click', () => API.toggleAuto());
   document.querySelectorAll('.speed-btn').forEach((b) =>
     b.addEventListener('click', () => { sfx('click'); API.setSpeed(+b.dataset.speed); }));
   $('#btn-save').addEventListener('click', () => { sfx('success'); API.save(); toast('Game saved', 'Your progress is stored locally.', 'good'); });
@@ -130,9 +148,15 @@ function renderMetrics(state) {
 }
 
 function renderControlbar(state) {
-  $('#cb-date').textContent = fmtDate(state.tick);
-  $('#btn-play').classList.toggle('active', !state.paused);
-  $('#btn-pause').classList.toggle('active', state.paused);
+  const turn = state.tick + 1;
+  $('#cb-date').textContent = `Turn ${turn} · ${fmtDate(state.tick)}`;
+  $('#btn-auto').classList.toggle('active', state.auto);
+  $('#btn-auto').textContent = state.auto ? '⏸ Auto' : '⏯ Auto';
+  // End Turn is disabled while a crisis awaits a decision
+  const blocked = state.events.length > 0;
+  $('#btn-endturn').disabled = blocked;
+  $('#btn-endyear').disabled = blocked;
+  $('#speed-group').style.display = state.auto ? 'flex' : 'none';
   document.querySelectorAll('.speed-btn').forEach((b) => b.classList.toggle('active', +b.dataset.speed === state.speed));
   if (state.log[0]) $('#cb-ticker').textContent = state.log[0].text;
 }
@@ -190,18 +214,25 @@ function viewDashboard(state) {
     pad.appendChild(list);
   }
 
-  // 3D state map
+  // 3D Australia map coloured by each state's government
   pad.appendChild(el('h3', {}, 'States & Territories'));
   const mapBox = el('div', { class: 'dash-map' });
-  const stage = el('div', { class: 'map3d-stage' });
-  const plane = el('div', { class: 'map3d-plane' });
-  const order = ['NT', 'QLD', 'WA', 'SA', 'NSW', '', 'VIC', 'ACT', 'TAS'];
-  for (const code of order) {
-    if (!code) { plane.appendChild(el('div')); continue; }
-    plane.appendChild(stateTile3D(state, STATES.find((s) => s.code === code)));
-  }
-  stage.appendChild(plane); mapBox.appendChild(stage); pad.appendChild(mapBox);
+  const map = buildAusMap({
+    colorOf: (code) => partyColour(state.stateGovs[code]?.party),
+    labelOf: (code) => code,
+    onClick: (code) => stateModal(state, STATES.find((s) => s.code === code)),
+  });
+  mapBox.appendChild(map.el);
+  pad.appendChild(mapBox);
+  pad.appendChild(partyLegend(state));
   return pad;
+}
+function partyLegend(state) {
+  const leg = el('div', { class: 'map-legend' });
+  for (const p of PARTIES.filter((x) => x.id !== 'ind' && x.id !== 'tea')) {
+    leg.appendChild(el('div', { class: 'lg' }, el('span', { class: 'sw', style: `background:${p.colour}` }), p.short));
+  }
+  return leg;
 }
 function kpi(label, val, sub) {
   const cls = typeof sub === 'string' && sub.startsWith('▲') ? 'k-up' : typeof sub === 'string' && sub.startsWith('▼') ? 'k-down' : '';
@@ -366,13 +397,14 @@ function viewElections(state) {
 
   // tabs
   const tabs = el('div', { style: 'margin:12px 0;display:flex;gap:6px;flex-wrap:wrap' });
-  [['intention', 'Voting intention'], ['pendulum', 'Pendulum'], ['results', 'Seat results'], ['referendums', 'Referendums']]
+  [['map', 'Results map'], ['intention', 'Voting intention'], ['pendulum', 'Pendulum'], ['results', 'Seat results'], ['referendums', 'Referendums']]
     .forEach(([k, lbl]) => tabs.appendChild(el('button', {
-      class: `btn small ${ELEC_TAB === k ? '' : 'secondary'}`, onclick: () => { ELEC_TAB = k; render(state); },
+      class: `btn small ${ELEC_TAB === k ? '' : 'secondary'}`, onclick: () => { sfx('tab'); ELEC_TAB = k; render(state); },
     }, lbl)));
   pad.appendChild(tabs);
 
-  if (ELEC_TAB === 'intention') tabIntention(state, pad);
+  if (ELEC_TAB === 'map') tabMap(state, pad);
+  else if (ELEC_TAB === 'intention') tabIntention(state, pad);
   else if (ELEC_TAB === 'pendulum') tabPendulum(state, pad);
   else if (ELEC_TAB === 'results') tabResults(state, pad);
   else if (ELEC_TAB === 'referendums') tabReferendums(state, pad);
@@ -382,6 +414,18 @@ function viewElections(state) {
       el('div', {}, el('b', {}, 'Snap election'), el('div', { class: 'muted' }, 'Call an early election (resets the clock).')),
       el('button', { class: 'btn', onclick: () => API.callElection() }, 'Call Election'))));
   return pad;
+}
+
+function tabMap(state, pad) {
+  pad.appendChild(el('p', { class: 'muted' }, 'States coloured by the party holding the most federal seats there. Click a state for detail.'));
+  const box = el('div', { style: 'height:420px' });
+  const map = buildAusMap({
+    colorOf: (code) => partyColour(stateLeadParty(state, code)),
+    onClick: (code) => stateModal(state, STATES.find((s) => s.code === code)),
+  });
+  box.appendChild(map.el);
+  pad.appendChild(box);
+  pad.appendChild(partyLegend(state));
 }
 
 function tabIntention(state, pad) {
@@ -506,6 +550,20 @@ export function showElectionNight(state, result, onDone) {
   body.appendChild(head);
   body.appendChild(tally.seg);
   body.appendChild(tally.counted);
+
+  // live 3D results map (states colour in as seats are counted)
+  const stateCounts = {}; STATES.forEach((s) => (stateCounts[s.code] = {}));
+  const leadColour = (code) => {
+    const t = stateCounts[code]; const coal = (t.lib || 0) + (t.nat || 0);
+    let best = null, bestN = 0; for (const [p, n] of Object.entries(t)) if (n > bestN) { best = p; bestN = n; }
+    if (!best) return '#cdd6e2';
+    if (coal >= bestN) best = 'lib';
+    return partyColour(best);
+  };
+  const mapBox = el('div', { class: 'enight-map' });
+  const liveMap = buildAusMap({ colorOf: () => '#cdd6e2' });
+  mapBox.appendChild(liveMap.el);
+  body.appendChild(mapBox);
   body.appendChild(tally.feed);
 
   $('#modal-title').textContent = '🗳️ Election Night — Live Count';
@@ -523,12 +581,15 @@ export function showElectionNight(state, result, onDone) {
     for (let b = 0; b < batch && i < order.length; b++, i++) {
       const s = order[i];
       counts[s.held]++;
+      stateCounts[s.state][s.held] = (stateCounts[s.state][s.held] || 0) + 1;
       const p = partyById(s.held);
+      sfx('count');
       const row = el('div', { class: 'fr' },
         el('span', {}, `${s.name} (${s.state})`),
         el('span', { class: s.gain ? 'gain' : '' }, `${p.short}${s.gain ? ' GAIN' : ''} · swing ${s.swing >= 0 ? '+' : ''}${s.swing.toFixed(1)}`));
       tally.feed.prepend(row);
     }
+    liveMap.update(leadColour);
     const left = sum2(counts, isLeft), right = i - left;
     govNum.textContent = String(left); oppNum.textContent = String(right);
     const lp = (left / Math.max(1, i)) * 100;
@@ -547,31 +608,42 @@ export function showElectionNight(state, result, onDone) {
 function sum2(counts, pred) { let n = 0; for (const k in counts) if (pred(k)) n += counts[k]; return n; }
 
 // --- Legislation ---
+const STAGE_FLOW = ['house', 'senate', 'assent'];
 function viewLegislation(state) {
   const pad = el('div', { class: 'view-pad' });
   pad.appendChild(el('h2', {}, '⚖️ Legislation'));
-  const canPropose = API.canLegislate();
+  const inGov = API.canLegislate();
+  const canIntro = API.canIntroduce();
   pad.appendChild(el('p', { class: 'muted' },
-    canPropose ? 'You hold a government office — propose bills below.'
-      : 'You need to be a Minister, Treasurer or PM to introduce government bills. You can still watch bills progress.'));
+    inGov ? 'As a member of government you can introduce bills, set the budget and repeal laws.'
+      : canIntro ? 'As a backbench MP you can introduce Private Member\'s Bills — harder to pass without the government\'s numbers.'
+      : 'Win a seat in Parliament to introduce and shepherd your own bills.'));
 
-  // active bills
+  // bill builder
+  if (canIntro) billBuilder(state, pad, inGov);
+
+  // active bills with full process tracker
   pad.appendChild(el('h3', {}, `Bills before Parliament (${state.bills.length})`));
   if (!state.bills.length) pad.appendChild(el('p', { class: 'muted' }, 'No bills currently in progress.'));
   for (const b of state.bills) {
-    const card = el('div', { class: 'card' },
-      el('div', { class: 'row-between' },
-        el('div', {}, el('b', {}, b.title), el('div', { class: 'muted' }, b.desc)),
-        el('span', { class: 'tag', style: 'background:#6b7780' }, b.stage.toUpperCase())));
-    if (b.votes.house) card.appendChild(el('div', { class: 'muted' }, `House: ${b.votes.house.yes}–${b.votes.house.no}`));
-    if (b.votes.senate) card.appendChild(el('div', { class: 'muted' }, `Senate: ${b.votes.senate.yes}–${b.votes.senate.no}`));
-    if (canPropose && b.stage !== 'failed') card.appendChild(el('button', { class: 'btn small', onclick: () => API.advanceBill(b.id) }, 'Advance stage'));
+    const card = el('div', { class: 'card' });
+    card.appendChild(el('div', { class: 'row-between' },
+      el('div', {}, el('b', {}, b.title), el('div', { class: 'muted' }, b.desc + (b.privateMember ? ' · Private Member\'s Bill' : ''))),
+      el('span', { class: 'tag', style: 'background:#6b7780' }, b.stage.toUpperCase())));
+    card.appendChild(stageTracker(b));
+    card.appendChild(el('div', { class: 'muted' }, effectSummary(effectOf(b))));
+    if (b.votes.house) card.appendChild(el('div', { class: 'muted' }, `House vote: ${b.votes.house.yes}–${b.votes.house.no} ${b.votes.house.pass ? '✅' : '❌'}`));
+    if (b.votes.senate) card.appendChild(el('div', { class: 'muted' }, `Senate vote: ${b.votes.senate.yes}–${b.votes.senate.no} ${b.votes.senate.pass ? '✅' : '❌'}`));
+    if (canIntro && b.stage !== 'failed') {
+      const lbl = b.stage === 'assent' ? 'Grant Royal Assent' : b.stage === 'senate' ? 'Put to the Senate' : 'Put to the House';
+      card.appendChild(el('button', { class: 'btn small', onclick: () => API.advanceBill(b.id) }, lbl));
+    }
     pad.appendChild(card);
   }
 
-  // propose new
-  if (canPropose) {
-    pad.appendChild(el('h3', {}, 'Propose a bill'));
+  // catalogue of ready-made reforms
+  if (canIntro) {
+    pad.appendChild(el('h3', {}, 'Ready-made reforms'));
     const grid = el('div', { class: 'grid2' });
     for (const pol of POLICY_CATALOGUE) {
       const already = state.laws.some((l) => l.policyId === pol.id);
@@ -587,20 +659,73 @@ function viewLegislation(state) {
 
   // enacted laws
   pad.appendChild(el('h3', {}, `Laws in force (${state.laws.length})`));
-  for (const law of state.laws) {
+  for (const law of [...state.laws].reverse()) {
     pad.appendChild(el('div', { class: 'card' },
       el('div', { class: 'row-between' },
         el('div', {}, el('b', {}, law.title), el('div', { class: 'muted' }, `Enacted ${fmtDate(law.enacted)}`)),
-        canPropose ? el('button', { class: 'btn small bad', onclick: () => API.repeal(law.id) }, 'Repeal') : el('span'))));
+        inGov ? el('button', { class: 'btn small bad', onclick: () => API.repeal(law.id) }, 'Repeal') : el('span'))));
   }
   return pad;
 }
+
+// The interactive "draft your own law" builder.
+let BILL_DRAFT = { title: '', category: 'health', intensity: 5 };
+function billBuilder(state, pad, inGov) {
+  pad.appendChild(el('h3', {}, '📝 Draft a Bill'));
+  const card = el('div', { class: 'card' });
+  const titleInput = el('input', { type: 'text', placeholder: 'Bill title, e.g. "Free TAFE Act"', value: BILL_DRAFT.title, style: 'width:100%;margin-bottom:10px' });
+  titleInput.addEventListener('input', () => (BILL_DRAFT.title = titleInput.value));
+  card.appendChild(titleInput);
+
+  // category chooser
+  const catGrid = el('div', { class: 'choice-grid', style: 'margin-bottom:10px' });
+  BILL_CATEGORIES.forEach((c) => {
+    const ch = el('div', { class: 'choice' + (BILL_DRAFT.category === c.id ? ' sel' : ''), style: 'color:var(--ink)', onclick: () => {
+      sfx('hover'); BILL_DRAFT.category = c.id; render(state);
+    } }, `${c.icon} ${c.name}`);
+    catGrid.appendChild(ch);
+  });
+  card.appendChild(catGrid);
+
+  // intensity slider with live projected effects
+  const eff = customEffect(BILL_DRAFT.category, BILL_DRAFT.intensity);
+  const out = el('span', {}, `Strength ${BILL_DRAFT.intensity}/10`);
+  const slider = el('input', { type: 'range', min: '1', max: '10', value: String(BILL_DRAFT.intensity) });
+  slider.addEventListener('input', () => { BILL_DRAFT.intensity = +slider.value; out.textContent = `Strength ${slider.value}/10`; updateProj(); });
+  card.appendChild(el('div', { class: 'slider-row' }, el('label', {}, el('span', {}, 'Intensity & funding'), out), slider));
+  const proj = el('div', { class: 'muted' });
+  function updateProj() { proj.textContent = 'Projected: ' + effectSummary(customEffect(BILL_DRAFT.category, BILL_DRAFT.intensity)); }
+  updateProj();
+  card.appendChild(proj);
+
+  card.appendChild(el('div', { style: 'margin-top:10px' },
+    el('button', { class: 'btn', onclick: () => {
+      API.proposeCustom({ title: BILL_DRAFT.title.trim(), category: BILL_DRAFT.category, intensity: BILL_DRAFT.intensity });
+      BILL_DRAFT.title = '';
+    } }, inGov ? 'Introduce Government Bill' : 'Introduce Private Member\'s Bill')));
+  pad.appendChild(card);
+}
+
+function stageTracker(b) {
+  const wrap = el('div', { style: 'display:flex;gap:6px;flex-wrap:wrap;margin:8px 0' });
+  const names = { house: 'House', senate: 'Senate', assent: 'Assent' };
+  const curIdx = STAGE_FLOW.indexOf(b.stage);
+  STAGE_FLOW.forEach((st, i) => {
+    const done = i < curIdx || b.stage === 'enacted';
+    const cur = i === curIdx;
+    const colour = done ? 'var(--good)' : cur ? 'var(--accent)' : '#c3cdda';
+    wrap.appendChild(el('span', { class: 'tag', style: `background:${colour}` }, `${done ? '✓ ' : ''}${names[st]}`));
+  });
+  return wrap;
+}
+
 function effectSummary(pol) {
+  if (!pol) return '';
   const parts = [];
   for (const [k, v] of Object.entries(pol.impact || {})) parts.push(`${k} ${v > 0 ? '+' : ''}${v}`);
   if (pol.cost) parts.push(`+$${pol.cost}B/yr ${pol.line}`);
   for (const [k, v] of Object.entries(pol.taxDelta || {})) parts.push(`${k} tax ${v > 0 ? '+' : ''}${round(v * 100)}pt`);
-  return parts.join(' · ');
+  return parts.join(' · ') || 'symbolic / no direct fiscal effect';
 }
 
 // --- Budget & Tax ---

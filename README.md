@@ -15,6 +15,31 @@ to Prime Minister, shaping the nation's laws, budget, economy and society from
 
 ---
 
+## Turn-based play
+
+The game is **turn-based** — one turn is one month. You advance time yourself:
+
+- **End Turn** — process a single month.
+- **End Year** — fast-forward up to twelve months (stops early for elections or crises).
+- **Auto** — optional hands-off mode that advances turns on a timer (with speed control).
+
+Crises pause the clock until you decide; you're never rushed.
+
+## Make your own laws
+
+Beyond the ready-made reform catalogue, there's a full **bill builder**: name your bill,
+pick a policy area (health, housing, defence, environment, integrity…), set its intensity
+and funding, and see the projected effects before you introduce it. **Any sitting MP can
+introduce a Private Member's Bill** — you don't have to be PM to start changing the country.
+Watch each bill move through the **House → Senate → Royal Assent** tracker with live vote
+counts, then see it take effect (or get struck down by the High Court).
+
+## The 3D map
+
+A real, extruded **3D map of Australia** shows the political landscape — coloured by each
+state's government on the dashboard, by seat holdings in the Elections screen, and **filling
+in live, state by state, on election night** as the count comes in.
+
 ## Production features
 
 - **Title screen & character creation** — name, starting career, party allegiance and three difficulty levels (Backbencher / Statesman / Crisis Nation).

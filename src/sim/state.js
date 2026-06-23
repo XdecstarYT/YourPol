@@ -190,7 +190,7 @@ export function newGame({ seed, career, playerName, partyId, difficulty = 'norma
     rng: rng.toJSON(),
     tick: 0,
     speed: 2,
-    paused: false,
+    auto: false,           // turn-based by default; auto-advances when true
     difficulty,
 
     stats: { monthsAsPM: 0, crisesHandled: 0 },
