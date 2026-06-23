@@ -6,7 +6,8 @@ import { METRICS, STATES, PARTIES, CAREERS, RANKS, partyById } from './data.js';
 import {
   approval, totalSpend, polById, polName, govLabel, nationalMood,
   availableActions, currentRankIndex, buildPendulum, seatStatus,
-  REFERENDUM_CATALOGUE,
+  REFERENDUM_CATALOGUE, topIndustries, renewableShare, courtBalance,
+  mediaMood, dynastyMembers,
 } from './sim/index.js';
 import { POLICY_CATALOGUE } from './sim/legislation.js';
 
@@ -127,6 +128,7 @@ function renderView(state) {
     dashboard: viewDashboard, parliament: viewParliament, elections: viewElections,
     legislation: viewLegislation, budget: viewBudget, parties: viewParties,
     career: viewCareer, history: viewHistory,
+    economy: viewEconomy, courts: viewCourts, society: viewSociety, world: viewWorld,
   }[VIEW] || viewDashboard;
   root.appendChild(fn(state));
 }
@@ -583,8 +585,8 @@ function viewParties(state) {
     card.appendChild(el('div', { class: 'muted' }, ideo));
     if (top.length) {
       const ul = el('div', {});
-      top.forEach((m) => ul.appendChild(el('div', { class: 'muted' },
-        `• ${m.name} — ${m.traits.join(', ')} (pop ${m.popularity}, comp ${m.competence})${m.rank === 'pm' ? ' [PM]' : ''}`)));
+      top.forEach((m) => ul.appendChild(el('div', { class: 'pol-link', onclick: () => polModal(state, m) },
+        `• ${m.name}${m.dynasty ? ' 👑' : ''} — ${m.traits.join(', ')} (pop ${m.popularity})${m.rank === 'pm' ? ' [PM]' : ''}`)));
       card.appendChild(ul);
     }
     pad.appendChild(card);
@@ -670,6 +672,186 @@ function onCareerAction(state, id) {
     return;
   }
   API.careerAction(id);
+}
+
+/* small reusable horizontal meter */
+function meter(label, value, colour, suffix = '') {
+  return el('div', { class: 'slider-row' },
+    el('label', {}, el('span', {}, label), el('span', {}, `${round(value)}${suffix}`)),
+    el('div', { class: 'm-bar' }, el('div', { class: 'm-fill', style: `width:${clamp(value)}%;background:${colour}` })));
+}
+
+// --- Economy, Industry & Energy ---
+function viewEconomy(state) {
+  const pad = el('div', { class: 'view-pad' });
+  pad.appendChild(el('h2', {}, '🏭 Economy, Industry & Energy'));
+  const e = state.economy;
+  pad.appendChild(el('div', { class: 'grid3' },
+    stat('GDP', fmtMoney(e.gdp)), stat('Growth', fmtPct(e.growth)), stat('Inflation', fmtPct(e.inflation)),
+    stat('Unemployment', fmtPct(e.unemployment)), stat('Cash rate', fmtPct(e.cashRate)), stat('Exports index', round(state._exports ?? 50))));
+
+  pad.appendChild(el('h3', {}, 'Industries'));
+  const grid = el('div', { class: 'grid2' });
+  for (const ind of topIndustries(state)) {
+    const col = ind.health >= 60 ? 'var(--good)' : ind.health >= 40 ? 'var(--warn)' : 'var(--bad)';
+    grid.appendChild(el('div', { class: 'card', style: 'margin:0' },
+      el('div', { class: 'row-between' },
+        el('b', {}, `${ind.icon} ${ind.name}`),
+        el('span', { class: 'muted' }, `${(ind.share * 100).toFixed(1)}% GDP · ${ind.growth >= 0 ? '+' : ''}${ind.growth.toFixed(1)}%`)),
+      el('div', { class: 'm-bar', style: 'margin-top:6px' }, el('div', { class: 'm-fill', style: `width:${ind.health}%;background:${col}` }))));
+  }
+  pad.appendChild(grid);
+
+  pad.appendChild(el('h3', {}, 'Energy grid'));
+  const en = state.energy;
+  pad.appendChild(el('div', { class: 'grid3' },
+    stat('Renewables', renewableShare(state).toFixed(0) + '%'),
+    stat('Reliability', round(en.reliability) + '%'),
+    stat('Emissions', round(en.emissions)),
+    stat('Price index', round(en.price)),
+    stat('Nuclear', en.nuclearLegal ? 'Legal' : 'Banned'),
+    stat('Mix', '')));
+  const ENERGY_COL = { coal: '#4a3b30', gas: '#d68a3a', hydro: '#3a78c2', solar: '#f2c12e', wind: '#5fb88f', battery: '#8a6fd4', nuclear: '#cf4ec0' };
+  for (const [id, share] of Object.entries(en.mix).sort((a, b) => b[1] - a[1])) {
+    pad.appendChild(meter(id[0].toUpperCase() + id.slice(1), share * 100, ENERGY_COL[id] || '#888', '%'));
+  }
+  return pad;
+}
+
+// --- High Court & Judiciary ---
+function viewCourts(state) {
+  const pad = el('div', { class: 'view-pad' });
+  pad.appendChild(el('h2', {}, '👨‍⚖️ The High Court of Australia'));
+  const bal = courtBalance(state);
+  pad.appendChild(el('p', { class: 'muted' },
+    `Bench balance: ${bal < -0.15 ? 'literalist / conservative' : bal > 0.15 ? 'progressive / expansive' : 'finely balanced'} (${bal.toFixed(2)}). ` +
+    `${state.courts.strikes} laws struck down to date.`));
+
+  pad.appendChild(el('h3', {}, 'The seven Justices'));
+  const grid = el('div', { class: 'grid2' });
+  for (const j of state.courts.justices) {
+    const lean = j.interpretation < -0.15 ? 'Literalist' : j.interpretation > 0.15 ? 'Progressive' : 'Centrist';
+    grid.appendChild(el('div', { class: 'card', style: 'margin:0' },
+      el('div', { class: 'row-between' },
+        el('b', {}, `${j.name}${j.chief ? ' (Chief Justice)' : ''}`),
+        el('span', { class: 'muted' }, `age ${Math.floor(j.age)}`)),
+      el('div', { class: 'muted' }, `${lean} · appointed by ${j.appointedBy === 'historic' ? 'former govt' : (partyById(j.appointedBy)?.short || j.appointedBy)}`)));
+  }
+  pad.appendChild(grid);
+
+  pad.appendChild(el('h3', {}, 'Constitutional cases'));
+  const cases = [...state.courts.cases].reverse().slice(0, 20);
+  if (!cases.length) pad.appendChild(el('p', { class: 'muted' }, 'No cases before the Court.'));
+  for (const c of cases) {
+    const colour = c.status === 'struck' ? 'var(--bad)' : c.status === 'upheld' ? 'var(--good)' : '#6b7780';
+    pad.appendChild(el('div', { class: 'card' },
+      el('div', { class: 'row-between' },
+        el('div', {}, el('b', {}, c.title), el('div', { class: 'muted' }, c.vote ? `Decided ${c.vote}` : `Hearing ${fmtDate(c.hearAt)}`)),
+        el('span', { class: 'tag', style: `background:${colour}` }, c.status.toUpperCase()))));
+  }
+  return pad;
+}
+
+// --- Media, Lobbying & Society ---
+function viewSociety(state) {
+  const pad = el('div', { class: 'view-pad' });
+  pad.appendChild(el('h2', {}, '📰 Media, Lobbying & Society'));
+  const s = state.society;
+
+  pad.appendChild(el('div', { class: 'grid3' },
+    stat('Media mood', mediaMood(state).toFixed(0)),
+    stat('Social sentiment', s.social.sentiment.toFixed(0)),
+    stat('Civil unrest', round(s.unrest))));
+  pad.appendChild(meter('Civil unrest', s.unrest, s.unrest > 55 ? 'var(--bad)' : s.unrest > 35 ? 'var(--warn)' : 'var(--good)'));
+
+  pad.appendChild(el('h3', {}, 'Media organisations'));
+  const t = el('table', { class: 'data' });
+  t.appendChild(el('tr', {}, el('th', {}, 'Outlet'), el('th', {}, 'Type'), el('th', {}, 'Lean'), el('th', {}, 'Reach'), el('th', {}, 'Coverage')));
+  for (const o of [...s.media].sort((a, b) => b.reach - a.reach)) {
+    const lean = o.lean < -0.2 ? 'Left' : o.lean > 0.2 ? 'Right' : 'Centre';
+    const cov = o.narrative > 4 ? '👍 Friendly' : o.narrative < -4 ? '👎 Hostile' : '➖ Neutral';
+    t.appendChild(el('tr', {}, el('td', {}, o.name), el('td', {}, o.type), el('td', {}, lean), el('td', {}, `${o.reach}%`), el('td', {}, cov)));
+  }
+  pad.appendChild(t);
+
+  pad.appendChild(el('h3', {}, 'Social media'));
+  pad.appendChild(el('div', { class: 'grid3' },
+    stat('Followers', (s.social.followers / 1000).toFixed(1) + 'M'),
+    stat('Virality', round(s.social.virality)),
+    stat('Disinformation', round(s.social.disinfo))));
+
+  pad.appendChild(el('h3', {}, 'Lobby groups'));
+  const grid = el('div', { class: 'grid2' });
+  for (const g of [...s.lobby].sort((a, b) => b.influence - a.influence)) {
+    grid.appendChild(el('div', { class: 'card', style: 'margin:0' },
+      el('div', { class: 'row-between' }, el('b', {}, `${g.icon} ${g.name}`), el('span', { class: 'muted' }, `influence ${g.influence}`)),
+      meter('Favour toward government', g.favour, partyById(state.gov.parties[0]).colour)));
+  }
+  pad.appendChild(grid);
+  return pad;
+}
+
+// --- Foreign Affairs & Defence ---
+function viewWorld(state) {
+  const pad = el('div', { class: 'view-pad' });
+  pad.appendChild(el('h2', {}, '🌏 Foreign Affairs, Defence & Intelligence'));
+  const w = state.world;
+  const canAct = API.canLegislate();
+  pad.appendChild(el('p', { class: 'muted' }, `Average diplomatic relations: ${w.avgRelation.toFixed(0)}. ${canAct ? 'You may conduct diplomacy below.' : 'Only the government can conduct foreign policy.'}`));
+
+  pad.appendChild(el('h3', {}, 'Nations'));
+  for (const n of [...w.nations].sort((a, b) => b.relation - a.relation)) {
+    const col = n.relation > 40 ? 'var(--good)' : n.relation < 0 ? 'var(--bad)' : 'var(--warn)';
+    const card = el('div', { class: 'card' });
+    card.appendChild(el('div', { class: 'row-between' },
+      el('div', {}, el('b', {}, `${n.flag} ${n.name}`), el('div', { class: 'muted' }, `${n.leader} · ${n.gov} · GDP ${fmtMoney(n.gdp)} · ${n.stance}${n.sanctioned ? ' · SANCTIONED' : ''}`)),
+      el('span', { class: 'tag', style: `background:${col}` }, `Rel ${n.relation.toFixed(0)}`)));
+    if (canAct) {
+      const acts = el('div', { style: 'margin-top:6px;display:flex;gap:6px;flex-wrap:wrap' });
+      [['trade', 'Trade deal'], ['treaty', 'Treaty'], ['aid', 'Foreign aid'], ['sanction', 'Sanction']].forEach(([a, lbl]) =>
+        acts.appendChild(el('button', { class: `btn small ${a === 'sanction' ? 'bad' : 'secondary'}`, onclick: () => API.foreignAction(n.id, a) }, lbl)));
+      card.appendChild(acts);
+    }
+    pad.appendChild(card);
+  }
+
+  pad.appendChild(el('h3', {}, 'Defence forces'));
+  const d = w.defence;
+  pad.appendChild(meter('Army', d.army, '#5a6b3a'));
+  pad.appendChild(meter('Navy', d.navy, '#2f5a8a'));
+  pad.appendChild(meter('Air Force', d.airforce, '#3a7a9a'));
+  pad.appendChild(meter('Cyber Command', d.cyber, '#8a6fd4'));
+  pad.appendChild(meter('Readiness', d.readiness, 'var(--accent)'));
+
+  pad.appendChild(el('h3', {}, 'Intelligence threats'));
+  const it = w.intel;
+  pad.appendChild(meter('Overall threat', it.threat, 'var(--bad)'));
+  pad.appendChild(meter('Foreign interference', it.foreignInterference, 'var(--warn)'));
+  pad.appendChild(meter('Cyber threat', it.cyberThreat, 'var(--warn)'));
+  pad.appendChild(meter('Terror threat', it.terror, 'var(--warn)'));
+  return pad;
+}
+
+// Politician detail incl. dynasty/family tree
+function polModal(state, pol) {
+  const body = el('div', {});
+  body.appendChild(el('p', {}, el('span', { class: 'tag', style: `background:${partyById(pol.party).colour}` }, partyById(pol.party).short),
+    ` ${pol.seat?.id ? pol.seat.id + ' · ' : ''}${pol.state} · age ${pol.age}${pol.dynasty ? ' · of the ' + pol.dynasty.split(' ').slice(-1)[0] + ' dynasty' : ''}`));
+  body.appendChild(el('div', { class: 'grid3' },
+    stat('Popularity', pol.popularity), stat('Competence', pol.competence), stat('Scandal risk', pol.scandalRisk)));
+  body.appendChild(el('p', { class: 'muted', style: 'margin-top:8px' }, 'Traits: ' + pol.traits.join(', ')));
+  body.appendChild(el('p', { class: 'muted' }, `Hidden — ego ${pol.hidden.ego}, greed ${pol.hidden.greed}, loyalty ${pol.hidden.loyalty}, risk ${pol.hidden.risk}`));
+  if (pol.family) {
+    body.appendChild(el('h3', {}, '👑 Family'));
+    if (pol.family.spouse) body.appendChild(el('div', { class: 'muted' }, `Spouse: ${pol.family.spouse}`));
+    (pol.family.children || []).forEach((c) => body.appendChild(el('div', { class: 'muted' }, `Child: ${c.name} (age ${Math.floor(c.age)})${c.path && c.path !== 'undecided' ? ' — ' + c.path : ''}`)));
+  }
+  const dyn = dynastyMembers(state, pol).filter((p) => p.id !== pol.id);
+  if (dyn.length) {
+    body.appendChild(el('h3', {}, 'Dynasty in parliament'));
+    dyn.forEach((p) => body.appendChild(el('div', { class: 'muted' }, `${p.name} — ${partyById(p.party).short}${p.chamber ? ' (' + (p.chamber === 'hor' ? 'House' : 'Senate') + ')' : ''}`)));
+  }
+  modal(pol.name, body, [{ label: 'Close', kind: 'secondary' }]);
 }
 
 // --- History ---

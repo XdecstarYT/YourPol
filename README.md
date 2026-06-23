@@ -66,6 +66,11 @@ the live causal chain you can watch unfold:
 | **Elections** | **All 151 real named divisions** (Sydney, Kooyong, Maranoa…) each contested with a full **preferential / instant-runoff** count, **two-candidate-preferred margins**, **seat-by-seat swings**, a national **two-party-preferred**, and an **electoral pendulum**. Proportional Senate; automatic government formation (majority / minority / Coalition). A **live election-night screen** counts seats in progressively, calling gains and swings in real time. |
 | **State governments** | All 8 states & territories have their own governing party, **Premier / Chief Minister**, approval, and **staggered four-year election cycles** that run independently. |
 | **Referendums** | Call national referendums (Republic, Voice, four-year terms, bill of rights…), decided by the constitutional **double majority** (national majority + 4 of 6 states). |
+| **High Court** | Seven Justices with their own interpretive philosophies; enacted laws can be **challenged and struck down** on constitutional grounds; the government appoints replacements as Justices retire at 70. |
+| **Industry & energy** | Ten industries (mining, tech, finance, agriculture…) each respond to their own policy/economic levers and feed back into GDP and jobs. A **national energy grid** trades off mix, reliability, price and emissions, with nuclear unlockable by law. |
+| **Media & society** | Media outlets cover the government through their own bias; social-media sentiment, virality and disinformation; **lobby groups** pressing agendas; and **civil unrest** that erupts into strikes, protests and riots. |
+| **Foreign & defence** | A living world of nations with their own economies and leaders; diplomatic relations, trade, treaties, sanctions and aid; defence forces and an intelligence threat picture (cyber, interference, terror). |
+| **Dynasties** | Prominent figures form families whose children can enter politics, the judiciary, media or business — dynasties that rise across generations. |
 | **Legislation** | A 12-policy catalogue. Bills progress House → Senate → Royal Assent; **AI MPs vote by ideology weighted by party loyalty**. Enacted laws apply immediate + ongoing effects and can be repealed. |
 | **Crises & scandals** | Dynamic events (bushfires, floods, recession, pandemic, cyber-attack, housing crisis) that pause the game for your decision when you govern; politicians (including you) can be caught in scandals. |
 | **Your career** | Start as one of 10 careers → join a party → **campaign in a chosen seat** → win it → climb Backbencher → Shadow → Minister → Treasurer → Leader → **Prime Minister**, unlocking real powers (budget, legislation, referendums) as you rise. |
@@ -131,15 +136,16 @@ has a clear home to grow into. Implemented ✓ / planned ○:
 - ✓ Legislative process & repeal
 - ✓ Crises, scandals, historical archive
 - ✓ Player career ladder to PM (with seat selection & campaigning)
-- ✓ **3D parliament chamber + tilted 3D map**
-- ○ Judicial system, High Court, constitutional challenges
-- ○ Per-industry economic modelling; energy grid; infrastructure projects
-- ○ Media & social-media dynamics; lobbying groups; civil unrest
-- ○ Foreign relations, defence procurement, intelligence
-- ○ Political dynasties / family trees
+- ✓ **3D parliament chamber + tilted 3D map**, redesigned modern UI
+- ✓ **Judicial system / High Court** — seven Justices, constitutional challenges, laws struck down, government appointments on retirement
+- ✓ **Per-industry economic modelling** (10 sectors) + **national energy grid** (mix, reliability, price, emissions, nuclear)
+- ✓ **Media & social-media dynamics, lobby groups, civil unrest**
+- ✓ **Foreign relations, defence & intelligence** with a living world of nations (trade, treaties, sanctions, aid)
+- ✓ **Political dynasties / family trees**
+- ✓ **Lightweight world simulation** — foreign nations with their own economies, leaders and relations
 - ○ Individually-simulated citizens at full scale (current model is statistical cohorts)
-- ○ Full world simulation (all nations), additional playable countries
-- ○ Modding, Steam Workshop, multiplayer
+- ○ Additional playable countries / historical scenarios
+- ○ Modding, Steam Workshop, multiplayer (architectural foundations only)
 
 Contributions and forks welcome — the modular `sim/` layout is designed so new
 systems plug into the tick orchestrator without touching the others.

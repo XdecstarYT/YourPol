@@ -5,6 +5,10 @@ import { RNG, uid } from '../engine.js';
 import { STATES, PARTIES, TOTAL_HOR, TOTAL_SENATE, FIRST_NAMES, LAST_NAMES, partyById } from '../data.js';
 import { ELECTORATES, KIND_LEAN } from '../data/electorates.js';
 import { firstPreferences, preferentialCount, twoPartyPreferred } from './voting.js';
+import { initIndustry } from './industry.js';
+import { initWorld } from './world.js';
+import { initSociety } from './society.js';
+import { initJudiciary } from './judiciary.js';
 
 const PUBLIC_TRAITS = ['Charismatic','Honest','Corrupt','Intelligent','Ambitious','Ruthless','Compassionate','Populist','Technocratic','Nationalist','Progressive','Conservative'];
 const SKILLS = ['speaking','negotiation','economics','legal','media','foreign','crisis','leadership','campaigning','policy'];
@@ -155,6 +159,12 @@ export function newGame({ seed, career, playerName, partyId } = {}) {
   // --- State & territory governments (each with a premier and own election clock) ---
   const stateGovs = buildStateGovernments(rng, electorates);
 
+  // --- Wider systems: industry/energy, the world, society, the courts ---
+  const industryState = initIndustry(rng);
+  const world = initWorld(rng);
+  const society = initSociety(rng);
+  const courts = initJudiciary(rng);
+
   // --- Government formation from seeded HoR ---
   const gov = formGovernment(politicians);
 
@@ -213,6 +223,12 @@ export function newGame({ seed, career, playerName, partyId } = {}) {
     cohorts,
     gov,                    // { parties:[], pm: polId, majority: bool, seats:{} }
     stateGovs,              // per-state governments & premiers
+
+    industries: industryState.industries,  // per-sector economy
+    energy: industryState.energy,           // national energy grid
+    world,                  // foreign nations, defence, intelligence
+    society,                // media, social media, lobby groups, unrest
+    courts,                 // High Court justices & constitutional cases
 
     bills: [],              // active/pending legislation
     laws: [],               // enacted laws (with ongoing effects)

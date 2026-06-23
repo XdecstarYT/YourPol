@@ -45,6 +45,9 @@ export const POLICY_CATALOGUE = [
   { id: 'integrity', title: 'Federal Integrity Commission Act', econ: 0.0, soc: -0.2,
     desc: 'A powerful anti-corruption watchdog.',
     impact: { institutions: +8 }, ongoing: { institutions: +1 } },
+  { id: 'nuclear', title: 'Nuclear Energy Legalisation Act', econ: 0.4, soc: 0.3,
+    desc: 'Lift the ban on nuclear power generation.',
+    impact: { economy: +1 }, flag: 'nuclearLegal' },
 ];
 
 export function makeBill(state, policyId, sponsorPolId) {
@@ -127,6 +130,8 @@ function enactBill(state, bill) {
   for (const [k, v] of Object.entries(pol.taxDelta || {})) {
     state.budget.tax[k] = clamp(state.budget.tax[k] + v, 0, 0.9);
   }
+  // special flags (e.g. legalising nuclear power)
+  if (pol.flag === 'nuclearLegal' && state.energy) state.energy.nuclearLegal = true;
   const law = {
     id: uid('law'), title: bill.title, policyId: bill.policyId,
     enacted: state.tick, ongoing: pol.ongoing || null, repealable: true,

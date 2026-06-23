@@ -8,6 +8,7 @@ import { runElection } from './sim/elections.js';
 import { resolveEvent, playerGoverns } from './sim/events.js';
 import { runAction } from './sim/career.js';
 import { proposeReferendum } from './sim/referendum.js';
+import { foreignAction } from './sim/world.js';
 import { initUI, render, showNewGameDialog, closeModal, modal, showElectionNight } from './ui.js';
 
 let state = null;
@@ -78,6 +79,7 @@ const api = {
   },
   repeal(lawId) { if (api.canLegislate()) repealLaw(state, lawId); render(state); },
   proposeReferendum(refId) { if (api.canLegislate()) proposeReferendum(state, refId); render(state); },
+  foreignAction(nationId, action) { if (api.canLegislate()) foreignAction(state, nationId, action); render(state); },
 
   // budget ----------------------------------------------------------------
   setSpend(cat, val) { if (api.canLegislate()) state.budget.spend[cat] = clamp(val, 0, 1000); render(state); },
