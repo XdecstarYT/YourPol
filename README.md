@@ -15,6 +15,14 @@ to Prime Minister, shaping the nation's laws, budget, economy and society from
 
 ---
 
+## Production features
+
+- **Title screen & character creation** — name, starting career, party allegiance and three difficulty levels (Backbencher / Statesman / Crisis Nation).
+- **Procedural audio** — a full sound-effect set and generative ambient music synthesised at runtime with the Web Audio API. No audio files; works completely offline. Toggle in Settings.
+- **Live data visualisation** — canvas trend charts (approval & happiness over time), an energy-mix donut, and KPI cards on the National Dashboard.
+- **Meta-game** — context-aware **objectives**, 15 unlockable **achievements** with pop-up notifications, and a final **legacy score & grade** for each playthrough.
+- **Polish** — animated toast notifications, audio cues on every major action, settings persistence, a redesigned modern UI.
+
 ## Running it
 
 No build step, no dependencies — it's vanilla ES modules. You just need any

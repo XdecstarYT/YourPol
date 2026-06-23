@@ -7,9 +7,12 @@ import {
   approval, totalSpend, polById, polName, govLabel, nationalMood,
   availableActions, currentRankIndex, buildPendulum, seatStatus,
   REFERENDUM_CATALOGUE, topIndustries, renewableShare, courtBalance,
-  mediaMood, dynastyMembers,
+  mediaMood, dynastyMembers, ACHIEVEMENTS, legacyScore,
 } from './sim/index.js';
 import { POLICY_CATALOGUE } from './sim/legislation.js';
+import { sfx, configureAudio, getAudioSettings, startMusic, unlockAudio } from './audio.js';
+import { lineChart, donut } from './charts.js';
+import { DIFFICULTIES } from './data.js';
 
 let API = null;
 let VIEW = 'dashboard';
@@ -17,6 +20,7 @@ let VIEW = 'dashboard';
 export function initUI(api) {
   API = api;
   wireChrome();
+  loadSettings();
 }
 
 /* ------------------------------------------------------------------ helpers */
@@ -53,14 +57,17 @@ export function closeModal() { $('#modal-host').classList.add('hidden'); }
 
 /* ------------------------------------------------------------------ chrome */
 function wireChrome() {
+  document.addEventListener('pointerdown', unlockAudio, { once: true });
   document.querySelectorAll('.rail-btn').forEach((b) =>
-    b.addEventListener('click', () => { setView(b.dataset.view); }));
-  $('#btn-play').addEventListener('click', () => API.setPaused(false));
-  $('#btn-pause').addEventListener('click', () => API.setPaused(true));
+    b.addEventListener('click', () => { sfx('tab'); setView(b.dataset.view); }));
+  $('#btn-play').addEventListener('click', () => { sfx('click'); API.setPaused(false); });
+  $('#btn-pause').addEventListener('click', () => { sfx('click'); API.setPaused(true); });
   document.querySelectorAll('.speed-btn').forEach((b) =>
-    b.addEventListener('click', () => API.setSpeed(+b.dataset.speed)));
-  $('#btn-save').addEventListener('click', () => { API.save(); toast('Game saved.'); });
-  $('#btn-load').addEventListener('click', () => API.load());
+    b.addEventListener('click', () => { sfx('click'); API.setSpeed(+b.dataset.speed); }));
+  $('#btn-save').addEventListener('click', () => { sfx('success'); API.save(); toast('Game saved', 'Your progress is stored locally.', 'good'); });
+  $('#btn-load').addEventListener('click', () => { sfx('click'); API.load(); });
+  $('#btn-settings').addEventListener('click', () => { sfx('click'); showSettings(); });
+  $('#btn-menu').addEventListener('click', () => { sfx('click'); API.openMenu(); });
   $('#modal-backdrop').addEventListener('click', closeModal);
 }
 function setView(v) {
@@ -68,7 +75,16 @@ function setView(v) {
   document.querySelectorAll('.rail-btn').forEach((b) => b.classList.toggle('active', b.dataset.view === v));
   render(API.state());
 }
-function toast(msg) { $('#cb-ticker').textContent = msg; }
+
+/* ---- toast notifications ---- */
+export function toast(title, body = '', kind = '') {
+  const host = $('#toast-host'); if (!host) return;
+  const t = el('div', { class: `toast ${kind}` }, el('div', { class: 'tt' }, title), body ? el('div', { class: 'tb' }, body) : null);
+  host.appendChild(t);
+  setTimeout(() => { t.classList.add('out'); setTimeout(() => t.remove(), 320); }, 4200);
+  // keep the ticker in sync too
+  $('#cb-ticker').textContent = title;
+}
 
 /* ------------------------------------------------------------------ render */
 export function render(state) {
@@ -133,21 +149,76 @@ function renderView(state) {
   root.appendChild(fn(state));
 }
 
-// --- Dashboard: 3D tilted state map with state governments ---
+// --- Dashboard: national overview with KPIs, trends, objectives & 3D map ---
 function viewDashboard(state) {
-  const wrap = el('div', { class: 'map-wrap' });
+  const pad = el('div', { class: 'view-pad' });
+  pad.appendChild(el('h2', {}, `National Dashboard · ${fmtDate(state.tick)}`));
+  const pm = state.gov.pm ? polName(state, state.gov.pm) : '—';
+  pad.appendChild(el('p', { class: 'muted' }, `${govLabel(state.gov)} government · Prime Minister ${pm} · ${state.difficulty} difficulty`));
+
+  // KPI cards
+  const e = state.economy, prev = state.trends?.[state.trends.length - 13];
+  const kpis = el('div', { class: 'kpi-row' });
+  kpis.appendChild(kpi('Approval', `${round(approval(state))}%`, delta(approval(state), prev?.approval)));
+  kpis.appendChild(kpi('Happiness', round(state.metrics.happiness), delta(state.metrics.happiness, prev?.happiness)));
+  kpis.appendChild(kpi('GDP', fmtMoney(e.gdp), `${fmtPct(e.growth)} growth`));
+  kpis.appendChild(kpi('Unemployment', fmtPct(e.unemployment), delta(prev?.unemployment, e.unemployment)));
+  kpis.appendChild(kpi('Inflation', fmtPct(e.inflation), ''));
+  kpis.appendChild(kpi('Net debt', fmtMoney(e.debt), `${fmtPct(e.cashRate)} cash rate`));
+  pad.appendChild(kpis);
+
+  // trend chart
+  if (state.trends && state.trends.length > 2) {
+    const card = el('div', { class: 'chart-card' });
+    card.appendChild(el('div', { class: 'muted', style: 'font-weight:700;margin-bottom:6px' }, 'Approval & Happiness over time'));
+    const canvas = el('canvas');
+    card.appendChild(canvas);
+    pad.appendChild(card);
+    // defer draw until in DOM
+    queueChart(() => lineChart(canvas, [
+      { label: 'Approval', color: '#3d6bf6', data: state.trends.map((p) => p.approval) },
+      { label: 'Happiness', color: '#1fa463', data: state.trends.map((p) => p.happiness) },
+    ], { min: 0, max: 100, width: chartWidth(canvas), height: 200 }));
+  }
+
+  // objectives
+  if (state.objectives?.length) {
+    pad.appendChild(el('h3', {}, 'Objectives'));
+    const list = el('div', { class: 'obj-list' });
+    for (const o of state.objectives) list.appendChild(el('div', { class: `obj ${o.done ? 'done' : ''}` },
+      el('span', { class: 'ck' }, o.done ? '✓' : ''), el('span', { class: 'ot' }, o.text), o.progress ? el('span', { class: 'op' }, o.progress) : null));
+    pad.appendChild(list);
+  }
+
+  // 3D state map
+  pad.appendChild(el('h3', {}, 'States & Territories'));
+  const mapBox = el('div', { class: 'dash-map' });
   const stage = el('div', { class: 'map3d-stage' });
   const plane = el('div', { class: 'map3d-plane' });
-  // crude geographic-ish ordering
   const order = ['NT', 'QLD', 'WA', 'SA', 'NSW', '', 'VIC', 'ACT', 'TAS'];
   for (const code of order) {
     if (!code) { plane.appendChild(el('div')); continue; }
     plane.appendChild(stateTile3D(state, STATES.find((s) => s.code === code)));
   }
-  stage.appendChild(plane);
-  wrap.appendChild(stage);
-  return wrap;
+  stage.appendChild(plane); mapBox.appendChild(stage); pad.appendChild(mapBox);
+  return pad;
 }
+function kpi(label, val, sub) {
+  const cls = typeof sub === 'string' && sub.startsWith('▲') ? 'k-up' : typeof sub === 'string' && sub.startsWith('▼') ? 'k-down' : '';
+  return el('div', { class: 'kpi' }, el('div', { class: 'k-label' }, label), el('div', { class: 'k-val' }, String(val)),
+    el('div', { class: `k-sub ${cls}` }, String(sub || '')));
+}
+function delta(cur, prev) {
+  if (prev == null) return '';
+  const d = cur - prev;
+  if (Math.abs(d) < 0.05) return '▬ steady';
+  return d > 0 ? `▲ ${Math.abs(d).toFixed(1)}` : `▼ ${Math.abs(d).toFixed(1)}`;
+}
+// charts must draw after insertion; run on next frame (skipped in headless envs)
+function queueChart(fn) {
+  if (typeof requestAnimationFrame === 'function') requestAnimationFrame(() => requestAnimationFrame(fn));
+}
+function chartWidth(canvas) { const w = canvas.parentElement?.clientWidth || 520; return Math.max(280, w - 4); }
 function stateTile3D(state, st) {
   const sg = state.stateGovs[st.code];
   const col = partyById(sg.party).colour;
@@ -631,6 +702,24 @@ function viewCareer(state) {
         el('div', {}, el('b', {}, a.label), el('div', { class: 'muted' }, a.desc + (a.note ? ` (${a.note})` : ''))),
         el('button', { class: 'btn small', disabled: a.enabled ? null : true, onclick: () => onCareerAction(state, a.id) }, 'Do it'))));
   }
+
+  // legacy score banner
+  const ls = legacyScore(state);
+  pad.appendChild(el('h3', {}, 'Legacy'));
+  pad.appendChild(el('div', { class: 'score-banner' },
+    el('div', { class: 'score-grade' }, ls.grade),
+    el('div', {}, el('div', { style: 'font-size:26px;font-weight:900' }, ls.score.toLocaleString()),
+      el('div', { class: 'muted', style: 'color:#b9c6d6' }, `Legacy score · ${ls.years} years · avg national index ${ls.avgMetric} · ${state.achievements.length}/${ACHIEVEMENTS.length} achievements`))));
+
+  // achievements grid
+  pad.appendChild(el('h3', {}, 'Achievements'));
+  const grid = el('div', { class: 'ach-grid' });
+  for (const a of ACHIEVEMENTS) {
+    const got = state.achievements?.includes(a.id);
+    grid.appendChild(el('div', { class: `ach ${got ? 'unlocked' : ''}` },
+      el('div', { class: 'ai' }, a.icon), el('div', { class: 'an' }, a.name), el('div', { class: 'ad' }, got ? a.desc : '🔒 Locked')));
+  }
+  pad.appendChild(grid);
   return pad;
 }
 function stat(label, val) { return el('div', { class: 'card', style: 'margin:0' }, el('div', { class: 'muted' }, label), el('div', { style: 'font-size:18px;font-weight:700' }, String(val))); }
@@ -712,9 +801,15 @@ function viewEconomy(state) {
     stat('Nuclear', en.nuclearLegal ? 'Legal' : 'Banned'),
     stat('Mix', '')));
   const ENERGY_COL = { coal: '#4a3b30', gas: '#d68a3a', hydro: '#3a78c2', solar: '#f2c12e', wind: '#5fb88f', battery: '#8a6fd4', nuclear: '#cf4ec0' };
-  for (const [id, share] of Object.entries(en.mix).sort((a, b) => b[1] - a[1])) {
-    pad.appendChild(meter(id[0].toUpperCase() + id.slice(1), share * 100, ENERGY_COL[id] || '#888', '%'));
-  }
+  const mixSorted = Object.entries(en.mix).sort((a, b) => b[1] - a[1]);
+  const split = el('div', { style: 'display:flex;gap:18px;align-items:center;flex-wrap:wrap' });
+  const dcanvas = el('canvas');
+  split.appendChild(dcanvas);
+  const bars = el('div', { style: 'flex:1;min-width:240px' });
+  for (const [id, share] of mixSorted) bars.appendChild(meter(id[0].toUpperCase() + id.slice(1), share * 100, ENERGY_COL[id] || '#888', '%'));
+  split.appendChild(bars);
+  pad.appendChild(split);
+  queueChart(() => donut(dcanvas, mixSorted.map(([id, v]) => ({ label: id, value: v, color: ENERGY_COL[id] || '#888' })), { size: 160 }));
   return pad;
 }
 
@@ -903,22 +998,116 @@ function renderContext(state) {
   state.log.slice(0, 8).forEach((h) => body.appendChild(el('div', { class: 'muted', style: 'margin:3px 0' }, `${fmtDate(h.tick)} — ${h.text}`)));
 }
 
-/* ----------------------------------------------------- start-up new-game */
-export function showNewGameDialog(onStart) {
+/* ============================================================
+   Title screen / main menu / character creation / settings
+   ============================================================ */
+const $menu = () => document.getElementById('menu-host');
+export function hideMenu() { const m = $menu(); m.classList.add('hidden'); m.innerHTML = ''; }
+
+export function showMainMenu({ onStart, onResume, hasSave }) {
+  const m = $menu();
+  const card = el('div', { class: 'menu-card' },
+    el('span', { class: 'menu-flag' }, '🇦🇺'),
+    el('div', { class: 'menu-logo' }, 'COMMONWEALTH OF AUSTRALIA'),
+    el('h1', { class: 'menu-title' }, 'POLITICAL SIMULATOR'),
+    el('div', { class: 'menu-sub' }, 'Govern a living nation across decades. Every law, election and crisis echoes for generations.'),
+  );
+  const actions = el('div', { class: 'menu-actions' });
+  actions.appendChild(el('button', { class: 'menu-btn primary', onclick: () => { sfx('click'); startMusic(); showCharacterCreation(onStart); } }, '▶  New Game'));
+  if (hasSave) actions.appendChild(el('button', { class: 'menu-btn', onclick: () => { sfx('click'); startMusic(); onResume(); } }, '⮌  Continue'));
+  actions.appendChild(el('button', { class: 'menu-btn', onclick: () => { sfx('click'); showSettings(); } }, '⚙  Settings'));
+  actions.appendChild(el('button', { class: 'menu-btn', onclick: () => { sfx('click'); showAbout(); } }, 'ℹ  About'));
+  card.appendChild(actions);
+  card.appendChild(el('div', { class: 'menu-foot' }, 'v0.4 · A simulation by an AI assistant · Built with vanilla JS, no engine'));
+  m.innerHTML = ''; m.appendChild(card); m.classList.remove('hidden');
+}
+
+function showCharacterCreation(onStart) {
+  const m = $menu();
+  let name = '', career = 'student', party = '', diff = 'normal';
+  const form = el('div', { class: 'menu-form' });
+
+  const nin = el('input', { type: 'text', placeholder: 'e.g. Alex Citizen', maxlength: '28' });
+  nin.addEventListener('input', () => (name = nin.value));
+  form.appendChild(el('div', { class: 'fld' }, el('label', {}, 'Your name'), nin));
+
+  // career choices
+  const careerGrid = el('div', { class: 'choice-grid' });
+  CAREERS.forEach((c, i) => {
+    const ch = el('div', { class: 'choice' + (i === 0 ? ' sel' : ''), onclick: () => {
+      sfx('hover'); career = c.id; careerGrid.querySelectorAll('.choice').forEach((x) => x.classList.remove('sel')); ch.classList.add('sel');
+    } }, c.name);
+    careerGrid.appendChild(ch);
+  });
+  form.appendChild(el('div', { class: 'fld' }, el('label', {}, 'Starting career'), careerGrid));
+
+  // party (optional)
+  const partyGrid = el('div', { class: 'choice-grid' });
+  const partyOpts = [{ id: '', short: 'Decide later' }, ...PARTIES.filter((p) => p.id !== 'ind')];
+  partyOpts.forEach((p, i) => {
+    const ch = el('div', { class: 'choice' + (i === 0 ? ' sel' : ''), style: p.colour ? `border-left:4px solid ${p.colour}` : '', onclick: () => {
+      sfx('hover'); party = p.id; partyGrid.querySelectorAll('.choice').forEach((x) => x.classList.remove('sel')); ch.classList.add('sel');
+    } }, p.short || p.name);
+    partyGrid.appendChild(ch);
+  });
+  form.appendChild(el('div', { class: 'fld' }, el('label', {}, 'Party allegiance (optional)'), partyGrid));
+
+  // difficulty
+  const diffGrid = el('div', { class: 'choice-grid' });
+  DIFFICULTIES.forEach((d) => {
+    const ch = el('div', { class: 'choice' + (d.id === 'normal' ? ' sel' : ''), onclick: () => {
+      sfx('hover'); diff = d.id; diffGrid.querySelectorAll('.choice').forEach((x) => x.classList.remove('sel')); ch.classList.add('sel');
+    } }, d.name, el('span', { class: 'ch-sub' }, d.desc));
+    diffGrid.appendChild(ch);
+  });
+  form.appendChild(el('div', { class: 'fld' }, el('label', {}, 'Difficulty'), diffGrid));
+
+  const card = el('div', { class: 'menu-card' },
+    el('h1', { class: 'menu-title', style: 'font-size:34px' }, 'Begin Your Career'),
+    el('div', { class: 'menu-sub' }, 'Forge a political life from 2026 onward.'),
+    form);
+  const actions = el('div', { class: 'menu-actions' });
+  actions.appendChild(el('button', { class: 'menu-btn primary', onclick: () => { sfx('election'); onStart({ career, playerName: name || 'Alex Citizen', partyId: party || null, difficulty: diff }); } }, '🏛  Enter Politics'));
+  actions.appendChild(el('button', { class: 'menu-btn', onclick: () => { sfx('click'); onStart({ career: null, difficulty: diff }); } }, '👁  Observe Only (sandbox)'));
+  actions.appendChild(el('button', { class: 'menu-btn', onclick: () => { sfx('click'); showMainMenu({ onStart, onResume: () => {}, hasSave: false }); } }, '←  Back'));
+  card.appendChild(actions);
+  m.innerHTML = ''; m.appendChild(card);
+}
+
+function showAbout() {
   const body = el('div', {});
   body.appendChild(el('p', {}, el('b', {}, 'Australia: The Ultimate Political Simulator')));
-  body.appendChild(el('p', { class: 'muted' }, 'Begin a career and shape the nation from 2026 onward. Choose who you are.'));
-  let name = '', career = 'student';
-  const nin = el('input', { type: 'text', placeholder: 'Your name', style: 'width:100%;padding:6px;margin-bottom:8px' });
-  nin.addEventListener('input', () => (name = nin.value));
-  body.appendChild(nin);
-  const csel = el('select', { style: 'width:100%;padding:6px' });
-  CAREERS.forEach((c) => csel.appendChild(el('option', { value: c.id }, c.name)));
-  csel.addEventListener('change', () => (career = csel.value));
-  body.appendChild(el('div', { class: 'slider-row' }, el('label', {}, 'Starting career'), csel));
+  body.appendChild(el('p', { class: 'muted' }, 'A deep political/government/economic grand-strategy simulation: 151 real electorates with preferential voting, a living economy and energy grid, the High Court, foreign affairs, media, dynasties and more — all interacting. Rise from citizen to Prime Minister and shape the nation for generations.'));
+  body.appendChild(el('p', { class: 'muted' }, 'Built with vanilla JavaScript and the Web Audio API — no game engine, no external assets. Runs entirely offline in your browser.'));
+  modal('About', body, [{ label: 'Close', kind: 'secondary' }]);
+}
 
-  modal('New Game', body, [
-    { label: 'Observe only', kind: 'secondary', run: () => onStart({ career: null }) },
-    { label: 'Begin career', run: () => onStart({ career, playerName: name || 'Alex Citizen' }) },
-  ]);
+export function showSettings() {
+  const s = getAudioSettings();
+  const body = el('div', {});
+  const enable = el('input', { type: 'checkbox' }); enable.checked = s.enabled;
+  const music = el('input', { type: 'checkbox' }); music.checked = s.music;
+  const vol = el('input', { type: 'range', min: '0', max: '100', value: String(Math.round(s.volume * 100)) });
+  const apply = () => { configureAudio({ enabled: enable.checked, music: music.checked, volume: +vol.value / 100 }); persistSettings(); };
+  enable.addEventListener('change', apply); music.addEventListener('change', apply); vol.addEventListener('input', apply);
+  body.appendChild(el('div', { class: 'slider-row' }, el('label', {}, el('span', {}, '🔊 Sound effects'), enable)));
+  body.appendChild(el('div', { class: 'slider-row' }, el('label', {}, el('span', {}, '🎵 Ambient music'), music)));
+  body.appendChild(el('div', { class: 'slider-row' }, el('label', {}, el('span', {}, 'Master volume'), el('span', {})), vol));
+  body.appendChild(el('p', { class: 'muted' }, 'All audio is generated procedurally — there are no sound files to download.'));
+  modal('⚙️ Settings', body, [{ label: 'Done', run: () => sfx('click') }]);
+}
+
+function persistSettings() {
+  try { localStorage.setItem('yourpol_settings', JSON.stringify(getAudioSettings())); } catch {}
+}
+export function loadSettings() {
+  try {
+    const raw = localStorage.getItem('yourpol_settings');
+    if (raw) configureAudio(JSON.parse(raw));
+  } catch {}
+}
+
+// achievement unlock toast (called from main loop)
+export function announceAchievements(list) {
+  for (const a of list) { sfx('achieve'); toast(`🏆 ${a.name}`, a.desc, 'achieve'); }
 }

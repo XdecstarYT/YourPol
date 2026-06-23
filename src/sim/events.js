@@ -8,9 +8,10 @@ import { archive, polById } from './state.js';
 export function tickEvents(state) {
   const rng = RNG.fromJSON(state.rng);
 
-  // ~6% chance of a crisis per month, scaled by instability.
-  const instability = (60 - state.metrics.happiness) / 200 + 0.05;
-  if (state.events.length === 0 && rng.chance(clamp(instability, 0.04, 0.18))) {
+  // ~6% chance of a crisis per month, scaled by instability and difficulty.
+  const diffMult = { easy: 0.6, normal: 1, hard: 1.6 }[state.difficulty] ?? 1;
+  const instability = ((60 - state.metrics.happiness) / 200 + 0.05) * diffMult;
+  if (state.events.length === 0 && rng.chance(clamp(instability, 0.03, 0.28))) {
     const tpl = rng.weighted(EVENT_TEMPLATES.map((e) => [e, e.weight]));
     const ev = { ...tpl, instanceId: `${tpl.id}_${state.tick}`, raised: state.tick };
     // apply the unavoidable shock immediately
@@ -63,6 +64,8 @@ export function resolveEvent(state, instanceId, choiceIdx) {
   const choice = ev.choices[choiceIdx];
   applyChoice(state, ev, choice);
   state.events.splice(idx, 1);
+  state.stats = state.stats || { monthsAsPM: 0, crisesHandled: 0 };
+  state.stats.crisesHandled++;
 }
 
 function applyChoice(state, ev, choice) {

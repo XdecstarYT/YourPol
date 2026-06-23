@@ -50,6 +50,13 @@ export const COALITION = ['lib', 'nat'];
 
 export function partyById(id) { return PARTIES.find((p) => p.id === id); }
 
+/* Difficulty presets — shape the starting hand and crisis frequency. */
+export const DIFFICULTIES = [
+  { id: 'easy',   name: 'Backbencher',  desc: 'Forgiving economy, fewer crises.' },
+  { id: 'normal', name: 'Statesman',    desc: 'A balanced challenge.' },
+  { id: 'hard',   name: 'Crisis Nation',desc: 'High debt, anger and frequent crises.' },
+];
+
 /* Player career ladder. Each rung unlocks powers in the sim. */
 export const CAREERS = [
   { id: 'student',     name: 'Student',            influence: 2 },

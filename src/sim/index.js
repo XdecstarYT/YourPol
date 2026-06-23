@@ -13,6 +13,7 @@ import { tickWorld } from './world.js';
 import { tickSociety } from './society.js';
 import { tickJudiciary } from './judiciary.js';
 import { tickDynasty } from './dynasty.js';
+import { tickMeta } from './achievements.js';
 
 export * from './state.js';
 export * from './economy.js';
@@ -28,6 +29,7 @@ export * from './world.js';
 export * from './society.js';
 export * from './judiciary.js';
 export * from './dynasty.js';
+export * from './achievements.js';
 
 // Advance the world by one month. Returns events that need player attention.
 export function tick(state) {
@@ -50,12 +52,15 @@ export function tick(state) {
   // Recompute live party support every quarter (cheap enough monthly too).
   if (state.tick % 3 === 0) computeSupport(state);
 
+  // Meta layer: objectives, achievements, trend recording.
+  const unlocked = tickMeta(state);
+
   // Federal election when due.
   if (state.tick >= state.nextElection) {
     const result = runElection(state);
     state._transient = state._transient || {};
     state._transient.lastElection = result;
-    return { election: result };
+    return { election: result, achievements: unlocked };
   }
-  return {};
+  return { achievements: unlocked };
 }

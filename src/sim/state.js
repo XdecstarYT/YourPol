@@ -123,7 +123,7 @@ export function seatStatus(margin) {
   return 'very safe';
 }
 
-export function newGame({ seed, career, playerName, partyId } = {}) {
+export function newGame({ seed, career, playerName, partyId, difficulty = 'normal' } = {}) {
   const rng = new RNG(seed ?? Date.now());
 
   // --- Party support snapshot ---
@@ -191,6 +191,12 @@ export function newGame({ seed, career, playerName, partyId } = {}) {
     tick: 0,
     speed: 2,
     paused: false,
+    difficulty,
+
+    stats: { monthsAsPM: 0, crisesHandled: 0 },
+    achievements: [],
+    objectives: [],
+    trends: [],
 
     metrics: {
       happiness: 55, institutions: 62, housing: 42, safety: 60, education: 58,
@@ -240,6 +246,10 @@ export function newGame({ seed, career, playerName, partyId } = {}) {
     player,
     log: [],                // recent ticker messages
   };
+
+  // Difficulty shapes the starting hand.
+  if (difficulty === 'hard') { state.economy.debt = 1250; state.economy.unemployment = 5.6; state.metrics.happiness = 47; state.metrics.economy = 46; }
+  else if (difficulty === 'easy') { state.economy.debt = 600; state.economy.unemployment = 3.4; state.metrics.happiness = 62; }
 
   archive(state, `The simulation begins. ${gov.pm ? polName(state, gov.pm) : 'A caretaker government'} leads the nation.`);
   return state;
