@@ -3,6 +3,8 @@
 
 import { RNG, uid } from '../engine.js';
 import { STATES, PARTIES, TOTAL_HOR, TOTAL_SENATE, FIRST_NAMES, LAST_NAMES, partyById } from '../data.js';
+import { ELECTORATES, KIND_LEAN } from '../data/electorates.js';
+import { firstPreferences, preferentialCount, twoPartyPreferred } from './voting.js';
 
 const PUBLIC_TRAITS = ['Charismatic','Honest','Corrupt','Intelligent','Ambitious','Ruthless','Compassionate','Populist','Technocratic','Nationalist','Progressive','Conservative'];
 const SKILLS = ['speaking','negotiation','economics','legal','media','foreign','crisis','leadership','campaigning','policy'];
@@ -81,18 +83,62 @@ function bandShare(band) {
   return shares[`${band[0]},${band[1]}`] ?? 0.2;
 }
 
+// Build the 151 electorates, each with a fixed ideological centre derived from
+// its kind + home-state lean + a seeded per-seat offset, then seed an initial
+// incumbent and two-party-preferred margin by running a notional first election.
+function buildElectorates(rng, nationalSupport) {
+  const list = [];
+  for (const e of ELECTORATES) {
+    const st = STATES.find((s) => s.code === e.state);
+    const k = KIND_LEAN[e.kind];
+    const point = {
+      name: e.name, state: e.state, kind: e.kind,
+      econ: clampv(k.econ + st.lean * 0.4 + rng.normal(0, 0.10)),
+      soc: clampv(k.soc + st.lean * 0.35 + rng.normal(0, 0.10)),
+      volatility: k.volatility,
+    };
+    const fp = firstPreferences(point, nationalSupport, () => rng.range(0.9, 1.1));
+    const res = preferentialCount(fp);
+    const tpp = twoPartyPreferred(fp);
+    point.held = res.winner;
+    point.tcp = res.two;
+    point.margin = res.margin;       // winner's 2CP margin over runner-up (half-spread)
+    point.tppAlp = tpp.alp;          // 2PP Labor share
+    point.fp = fp;
+    point.mpId = null;
+    list.push(point);
+  }
+  return list;
+}
+
+// Classify a seat as safe / fairly safe / marginal by its 2CP margin.
+export function seatStatus(margin) {
+  if (margin < 3) return 'marginal';
+  if (margin < 6) return 'fairly safe';
+  if (margin < 12) return 'safe';
+  return 'very safe';
+}
+
 export function newGame({ seed, career, playerName, partyId } = {}) {
   const rng = new RNG(seed ?? Date.now());
 
-  // --- Politicians: fill parliament proportional to party base support ---
+  // --- Party support snapshot ---
+  const support = {};
+  PARTIES.forEach((p) => (support[p.id] = p.base * 100));
+
+  // --- Electorates: 151 named divisions with leans and starting margins ---
+  const electorates = buildElectorates(rng, support);
+
+  // --- Politicians: one MP per electorate, plus the Senate ---
   const politicians = [];
-  // Allocate HoR seats per state by current support, simplest: base shares.
+  for (const e of electorates) {
+    const mp = makePolitician(rng, e.held, e.state, {
+      seat: { id: e.name, state: e.state }, chamber: 'hor',
+    });
+    e.mpId = mp.id;
+    politicians.push(mp);
+  }
   for (const st of STATES) {
-    for (let i = 0; i < st.hor; i++) {
-      const pid = rng.weighted(PARTIES.map((p) => [p.id, p.base * seatBias(p.id, st.lean)]));
-      politicians.push(makePolitician(rng, pid, st.code, { seat: { state: st.code }, chamber: 'hor' }));
-    }
-    const senseats = st.senate / 2; // half up each cycle; seed full complement
     for (let i = 0; i < st.senate; i++) {
       const pid = rng.weighted(PARTIES.map((p) => [p.id, p.base]));
       politicians.push(makePolitician(rng, pid, st.code, { chamber: 'senate' }));
@@ -104,11 +150,10 @@ export function newGame({ seed, career, playerName, partyId } = {}) {
     politicians.push(makePolitician(rng, p.id, rng.pick(STATES).code, { rank: 'candidate' }));
   }
 
-  // --- Party support snapshot from politician counts ---
-  const support = {};
-  PARTIES.forEach((p) => (support[p.id] = p.base * 100));
-
   const cohorts = buildCohorts(rng);
+
+  // --- State & territory governments (each with a premier and own election clock) ---
+  const stateGovs = buildStateGovernments(rng, electorates);
 
   // --- Government formation from seeded HoR ---
   const gov = formGovernment(politicians);
@@ -162,12 +207,16 @@ export function newGame({ seed, career, playerName, partyId } = {}) {
     },
 
     support,                // party support %, sums ~100
+    tpp: 50,                // national two-party-preferred (Labor share)
     politicians,
+    electorates,            // 151 divisions with leans, incumbents, margins
     cohorts,
     gov,                    // { parties:[], pm: polId, majority: bool, seats:{} }
+    stateGovs,              // per-state governments & premiers
 
     bills: [],              // active/pending legislation
     laws: [],               // enacted laws (with ongoing effects)
+    referendums: [],        // active & past referendums
     history: [],            // permanent archive of events
     nextElection: 36,       // tick of next federal election (3 years)
     events: [],             // active event queue awaiting player choice
@@ -186,6 +235,31 @@ function seatBias(pid, lean) {
   if (pid === 'grn') return lean < 0 ? 1.4 : 0.6;
   if (pid === 'onp') return lean > 0.05 ? 1.5 : 0.5;
   return 1;
+}
+
+// Build a government for each state/territory from the leanings of its own
+// electorates, naming a Premier (or Chief Minister) from the governing party.
+function buildStateGovernments(rng, electorates) {
+  const govs = {};
+  for (const st of STATES) {
+    const seats = electorates.filter((e) => e.state === st.code);
+    const tally = {};
+    seats.forEach((e) => (tally[e.held] = (tally[e.held] || 0) + 1));
+    const coalition = (tally.lib || 0) + (tally.nat || 0);
+    const labor = tally.alp || 0;
+    const govParty = coalition >= labor ? 'lib' : 'alp';
+    const titleLeader = (st.code === 'ACT' || st.code === 'NT') ? 'Chief Minister' : 'Premier';
+    govs[st.code] = {
+      party: govParty,
+      premier: makeName(rng),
+      title: titleLeader,
+      seats: tally,
+      approval: Math.round(rng.range(40, 60)),
+      // staggered four-year state election cycles
+      nextElection: rng.int(8, 48),
+    };
+  }
+  return govs;
 }
 
 // Determine government from House of Representatives composition.

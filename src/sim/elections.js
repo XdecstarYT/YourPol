@@ -1,34 +1,31 @@
-// sim/elections.js — voter behaviour, preferential (instant-runoff) seat
-// counting, Senate proportional allocation, and government formation.
+// sim/elections.js — the real election engine. Voter intention is computed from
+// the citizen cohorts; every one of the 151 divisions is then contested with a
+// full preferential count, producing winners, two-candidate-preferred margins,
+// seat-by-seat swings, a national two-party-preferred and an electoral pendulum.
 
 import { RNG, clamp, sum } from '../engine.js';
 import { STATES, PARTIES, COALITION, TOTAL_HOR, partyById } from '../data.js';
-import { makePolitician, formGovernment, archive, polName } from './state.js';
+import { makePolitician, formGovernment, archive, polName, seatStatus } from './state.js';
 import { approval } from './economy.js';
+import { ideologyAffinity, firstPreferences, preferentialCount, twoPartyPreferred } from './voting.js';
 
-// How well a party matches a voter cohort: closeness in 2D ideology space,
-// modulated by national mood (incumbents punished/rewarded by approval).
-function affinity(party, cohort, state, incumbentParties) {
-  const d = Math.hypot(party.econ - cohort.econ, party.soc - cohort.soc);
-  let score = Math.max(0, 1.4 - d);            // 0..~1.4
-  score *= party.base * 3 + 0.3;               // brand strength
-  // incumbency effect from approval
+// --- National voting intention from the cohort model -----------------------
+function cohortAffinity(party, cohort, state, incumbentParties) {
+  let score = ideologyAffinity(party, cohort);
   if (incumbentParties.includes(party.id)) {
-    const swing = (approval(state) - 50) / 100; // -.5..+.5
+    const swing = (approval(state) - 50) / 100;        // incumbency reward/punishment
     score *= 1 + swing * 0.9;
   }
-  // cohort dissatisfaction pushes toward minor parties / protest votes
-  if (cohort.happiness < 45 && party.base < 0.15) score *= 1.25;
+  if (cohort.happiness < 45 && party.base < 0.15) score *= 1.25; // protest vote to minors
   return Math.max(0.01, score);
 }
 
-// Compute national first-preference support % from the cohort model.
 export function computeSupport(state) {
   const inc = state.gov.parties;
   const tally = {};
   PARTIES.forEach((p) => (tally[p.id] = 0));
   for (const c of state.cohorts) {
-    const scores = PARTIES.map((p) => [p.id, affinity(p, c, state, inc)]);
+    const scores = PARTIES.map((p) => [p.id, cohortAffinity(p, c, state, inc)]);
     const tot = sum(scores, ([, s]) => s);
     for (const [id, s] of scores) tally[id] += (s / tot) * c.weight;
   }
@@ -36,120 +33,148 @@ export function computeSupport(state) {
   const support = {};
   for (const id of Object.keys(tally)) support[id] = (tally[id] / totalW) * 100;
   state.support = support;
+  // national 2PP from aggregate first preferences
+  state.tpp = twoPartyPreferred(support).alp;
   return support;
 }
 
-// Instant-runoff within a single seat given first-preference vote shares.
-// Preferences flow by ideological proximity (the classic Labor↔Greens,
-// Coalition↔One Nation flows fall out of the geometry naturally).
-function preferentialWinner(rng, firstPrefs) {
-  let live = { ...firstPrefs };
-  const order = (id) => partyById(id);
-  while (true) {
-    const entries = Object.entries(live).filter(([, v]) => v > 0);
-    const total = sum(entries, ([, v]) => v);
-    entries.sort((a, b) => b[1] - a[1]);
-    if (entries.length === 1 || entries[0][1] > total / 2) return entries[0][0];
-    // eliminate lowest, distribute by nearest ideological neighbour
-    const [loserId, loserVotes] = entries[entries.length - 1];
-    const loser = order(loserId);
-    delete live[loserId];
-    const remaining = Object.keys(live);
-    const dist = remaining.map((id) => {
-      const p = order(id);
-      return [id, 1 / (0.1 + Math.hypot(p.econ - loser.econ, p.soc - loser.soc))];
-    });
-    const dtot = sum(dist, ([, w]) => w);
-    for (const [id, w] of dist) live[id] += loserVotes * (w / dtot);
-  }
-}
-
-// Run a full federal election: 151 HoR seats by preferential vote,
-// Senate by simplified proportional allocation, then form government.
+// --- A full federal election ----------------------------------------------
 export function runElection(state) {
   const rng = RNG.fromJSON(state.rng);
   computeSupport(state);
 
-  // Remove current elected MPs (they must re-contest); keep candidate pool.
+  // Keep only non-elected aspirants; sitting MPs must recontest.
   const survivors = state.politicians.filter((p) => !p.chamber);
-  const newMPs = [];
+  const newMembers = [];
   const seatResults = [];
 
+  // House: contest every division.
+  for (const e of state.electorates) {
+    const st = STATES.find((s) => s.code === e.state);
+    // local first preferences = seat ideology + national support + local swing
+    const fp = firstPreferences(e, state.support, () => rng.range(1 - e.volatility, 1 + e.volatility));
+    const res = preferentialCount(fp);
+    const tpp = twoPartyPreferred(fp);
+    const prevTppAlp = e.tppAlp ?? 50;
+    const swing = tpp.alp - prevTppAlp;          // 2PP swing to Labor (+) / Coalition (-)
+    const prevHeld = e.held;
+
+    // create the winning member
+    const mp = makePolitician(rng, res.winner, e.state, {
+      seat: { id: e.name, state: e.state }, chamber: 'hor', rank: 'backbench',
+    });
+    newMembers.push(mp);
+
+    // update the electorate record
+    e.held = res.winner;
+    e.tcp = res.two;
+    e.margin = res.margin;
+    e.tppAlp = tpp.alp;
+    e.fp = fp;
+    e.mpId = mp.id;
+
+    seatResults.push({
+      name: e.name, state: e.state, kind: e.kind,
+      held: res.winner, prevHeld, gain: res.winner !== prevHeld,
+      margin: res.margin, status: seatStatus(res.margin),
+      swing, winnerName: mp.name, tcp: res.two, twoShares: res.twoShares, fp,
+      // a notional "count speed": marginals & big seats report later
+      reportOrder: rng.range(0, 1) + (res.margin < 4 ? 0.6 : 0),
+    });
+  }
+
+  // Senate: proportional by state (full re-seat for simulation simplicity).
   for (const st of STATES) {
-    // per-state base support tilts by state lean
-    for (let i = 0; i < st.hor; i++) {
-      const fp = {};
-      for (const p of PARTIES) {
-        const tilt = 1 + st.lean * (p.econ + p.soc) * 0.4;
-        // per-seat random local factor
-        fp[p.id] = Math.max(0, state.support[p.id] * tilt * rng.range(0.7, 1.3));
-      }
-      const winnerParty = preferentialWinner(rng, fp);
-      const mp = makePolitician(rng, winnerParty, st.code, {
-        seat: { state: st.code }, chamber: 'hor', rank: 'backbench',
-      });
-      newMPs.push(mp);
-      seatResults.push({ state: st.code, party: winnerParty });
-    }
-    // Senate: proportional (half the state's seats up; we re-seat full for sim simplicity)
-    const senateSeats = st.senate;
-    const quota = 100 / (senateSeats + 1);
-    let remaining = senateSeats;
-    const senTally = PARTIES.map((p) => ({ id: p.id, v: state.support[p.id] * rng.range(0.85, 1.15) }));
-    senTally.sort((a, b) => b.v - a.v);
+    const quota = 100 / (st.senate + 1);
+    let remaining = st.senate;
+    const tally = PARTIES.map((p) => ({ id: p.id, v: state.support[p.id] * rng.range(0.85, 1.15) }));
+    tally.sort((a, b) => b.v - a.v);
     let idx = 0;
-    while (remaining > 0) {
-      const cand = senTally[idx % senTally.length];
-      if (cand.v >= quota * 0.5 || remaining > senTally.length) {
-        newMPs.push(makePolitician(rng, cand.id, st.code, { chamber: 'senate', rank: 'backbench' }));
+    while (remaining > 0 && idx < 200) {
+      const cand = tally[idx % tally.length];
+      if (cand.v >= quota * 0.5 || remaining > tally.length) {
+        newMembers.push(makePolitician(rng, cand.id, st.code, { chamber: 'senate', rank: 'backbench' }));
         cand.v -= quota; remaining--;
       }
       idx++;
-      if (idx > 200) break;
     }
   }
 
-  // Carry the player's politician through if they held/contested a seat.
-  state.politicians = [...survivors, ...newMPs];
-  reinstatePlayer(state, rng);
+  state.politicians = [...survivors, ...newMembers];
+  state.rng = rng.toJSON();
+  reinstatePlayer(state);                 // uses its own rng pull
 
   state.gov = formGovernment(state.politicians);
-  state.rng = rng.toJSON();
   state.nextElection = state.tick + 36;
 
   const result = tallyResult(state);
+  result.seatResults = seatResults;
+  result.tpp = state.tpp;
+  result.nationalSwing = avgSwing(seatResults);
+  result.pendulum = buildPendulum(state);
+  result.gains = seatResults.filter((s) => s.gain);
+
   const pm = state.gov.pm ? polName(state, state.gov.pm) : 'a hung parliament';
   archive(state,
-    `FEDERAL ELECTION: ${govLabel(state.gov)} ${state.gov.majority ? 'wins majority' : 'forms minority government'}. ${pm} to be Prime Minister.`,
+    `🗳️ FEDERAL ELECTION: ${govLabel(state.gov)} ${state.gov.majority ? 'wins majority' : 'forms minority government'} ` +
+    `(2PP ${result.tpp.toFixed(1)}% ALP). ${pm} to be PM. ${result.gains.length} seats change hands.`,
     'election');
-  return { ...result, seatResults };
+  return result;
 }
 
-// If the player ran, give them a seat based on their reputation vs swing.
-function reinstatePlayer(state, rng) {
+function avgSwing(seatResults) {
+  return sum(seatResults, (s) => s.swing) / seatResults.length;
+}
+
+// The electoral pendulum: every seat sorted by margin, government seats on one
+// side, opposition on the other — the classic Australian "who's next to fall".
+export function buildPendulum(state) {
+  const rows = state.electorates.map((e) => ({
+    name: e.name, state: e.state, held: e.held, margin: e.margin, status: seatStatus(e.margin),
+  }));
+  const govParties = state.gov.parties;
+  const govSide = rows.filter((r) => govParties.includes(r.held)).sort((a, b) => a.margin - b.margin);
+  const oppSide = rows.filter((r) => !govParties.includes(r.held)).sort((a, b) => a.margin - b.margin);
+  return { govSide, oppSide };
+}
+
+// Player contests their chosen division.
+function reinstatePlayer(state) {
   const pl = state.player;
   if (!pl || !pl.partyId || !pl.running) return;
-  // win chance scales with reputation, party support and incumbency
-  const partySup = state.support[pl.partyId] || 10;
-  const winP = clamp((pl.reputation - 40) + partySup, 5, 92) / 100;
+  const rng = RNG.fromJSON(state.rng);
+
+  // pick the seat the player is contesting (their nominated seat, else home-state)
+  let seat = state.electorates.find((e) => e.name === pl.electorate);
+  if (!seat) seat = state.electorates.find((e) => e.state === (pl.homeState || 'NSW'));
+  if (!seat) { state.rng = rng.toJSON(); return; }
+
+  // base local support for the player's party + personal reputation boost +
+  // incumbency if they already hold the seat
+  const partyLocal = (state.support[pl.partyId] || 10);
+  const personal = (pl.reputation - 50) * 0.6 + (pl.campaignedSeat === seat.name ? 8 : 0);
+  const incumbent = pl.electorate === seat.name && pl.elected ? 6 : 0;
+  const seatFavour = -Math.hypot(partyById(pl.partyId).econ - seat.econ, partyById(pl.partyId).soc - seat.soc) * 10;
+  const winP = clamp(35 + (partyLocal - 30) + personal + incumbent + seatFavour, 5, 95) / 100;
+
   if (rng.chance(winP)) {
-    const mp = makePolitician(rng, pl.partyId, pl.homeState || 'NSW', {
-      name: pl.name, seat: { state: pl.homeState || 'NSW' }, chamber: 'hor',
+    // replace whoever the generic sim seated here with the player's member
+    state.politicians = state.politicians.filter((p) => !(p.chamber === 'hor' && p.seat?.id === seat.name));
+    const mp = makePolitician(rng, pl.partyId, seat.state, {
+      name: pl.name, seat: { id: seat.name, state: seat.state }, chamber: 'hor',
       rank: pl.rank && pl.rank !== 'candidate' ? pl.rank : 'backbench', isPlayer: true,
     });
     state.politicians.push(mp);
-    pl.polId = mp.id;
-    pl.rank = mp.rank;
-    pl.elected = true;
-    archive(state, `${pl.name} WINS the seat of ${seatName(pl.homeState)} for ${partyById(pl.partyId).short}.`, 'player');
+    seat.held = pl.partyId; seat.mpId = mp.id;
+    pl.polId = mp.id; pl.rank = mp.rank; pl.elected = true; pl.electorate = seat.name;
+    archive(state, `🎉 ${pl.name} WINS ${seat.name} (${seat.state}) for ${partyById(pl.partyId).short}.`, 'player');
   } else {
-    pl.elected = false;
-    pl.polId = null;
-    archive(state, `${pl.name} loses the contest for ${seatName(pl.homeState)}. The campaign continues.`, 'player');
+    pl.elected = false; pl.polId = null;
+    archive(state, `${pl.name} falls short in ${seat.name}. The campaign continues.`, 'player');
   }
   pl.running = false;
+  state.rng = rng.toJSON();
 }
-function seatName(code) { return (STATES.find((s) => s.code === code)?.name || code) + ' (local seat)'; }
 
 export function tallyResult(state) {
   const seats = {};
@@ -164,4 +189,47 @@ export function tallyResult(state) {
 export function govLabel(gov) {
   if (gov.parties.length > 1) return 'The Coalition';
   return partyById(gov.parties[0])?.short || 'Government';
+}
+
+// --- State & territory elections (lighter weight) --------------------------
+export function tickStateElections(state) {
+  for (const st of STATES) {
+    const sg = state.stateGovs[st.code];
+    if (!sg) continue;
+    if (state.tick >= (sg._scheduled ?? sg.nextElection)) {
+      runStateElection(state, st.code);
+    }
+  }
+}
+
+export function runStateElection(state, code) {
+  const rng = RNG.fromJSON(state.rng);
+  const st = STATES.find((s) => s.code === code);
+  const sg = state.stateGovs[code];
+  const seats = state.electorates.filter((e) => e.state === code);
+  const tally = {};
+  for (const e of seats) {
+    const fp = firstPreferences(e, state.support, () => rng.range(0.85, 1.15));
+    const w = preferentialCount(fp).winner;
+    tally[w] = (tally[w] || 0) + 1;
+  }
+  const coalition = (tally.lib || 0) + (tally.nat || 0);
+  const labor = tally.alp || 0;
+  const newParty = coalition >= labor ? 'lib' : 'alp';
+  const changed = newParty !== sg.party;
+  sg.party = newParty;
+  sg.seats = tally;
+  sg.approval = Math.round(rng.range(42, 58));
+  if (changed) sg.premier = pickName(rng);
+  sg.nextElection = state.tick + 48;
+  sg._scheduled = state.tick + 48;
+  state.rng = rng.toJSON();
+  archive(state,
+    `🏛️ ${st.name} ELECTION: ${partyById(newParty).short} ${changed ? 'wins government' : 'returned'} under ${sg.title} ${sg.premier}.`,
+    'election');
+}
+function pickName(rng) {
+  const F = ['Sam','Chris','Pat','Jo','Alex','Lee','Morgan','Riley','Jordan','Casey'];
+  const L = ['Bennett','Nguyen','Walker','Singh','Brown','Murphy','Chen','Kelly','Hughes','Ryan'];
+  return `${rng.pick(F)} ${rng.pick(L)}`;
 }

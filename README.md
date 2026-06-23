@@ -63,11 +63,14 @@ the live causal chain you can watch unfold:
 | **Budget & tax** | Line-item spending (health, education, welfare, defence, …) and adjustable tax rates (income, company, GST, CGT, carbon, resources) with a Laffer-style revenue model. |
 | **Citizens** | A weighted **cohort model** (age band × state × ideology) standing in for millions of voters — they have happiness, trust, age, and ideology that drifts via generational replacement. |
 | **Parties & politicians** | 7 parties on a 2-D ideology map; the Coalition runs together. Procedurally generated MPs with public traits, hidden traits (ego, greed, loyalty, risk…), 10 skills, popularity, competence and scandal risk. |
-| **Elections** | Full federal elections every 3 years (or snap): **preferential / instant-runoff** counting per seat (151 House seats), proportional Senate, automatic government formation (majority / minority / Coalition). |
+| **Elections** | **All 151 real named divisions** (Sydney, Kooyong, Maranoa…) each contested with a full **preferential / instant-runoff** count, **two-candidate-preferred margins**, **seat-by-seat swings**, a national **two-party-preferred**, and an **electoral pendulum**. Proportional Senate; automatic government formation (majority / minority / Coalition). A **live election-night screen** counts seats in progressively, calling gains and swings in real time. |
+| **State governments** | All 8 states & territories have their own governing party, **Premier / Chief Minister**, approval, and **staggered four-year election cycles** that run independently. |
+| **Referendums** | Call national referendums (Republic, Voice, four-year terms, bill of rights…), decided by the constitutional **double majority** (national majority + 4 of 6 states). |
 | **Legislation** | A 12-policy catalogue. Bills progress House → Senate → Royal Assent; **AI MPs vote by ideology weighted by party loyalty**. Enacted laws apply immediate + ongoing effects and can be repealed. |
 | **Crises & scandals** | Dynamic events (bushfires, floods, recession, pandemic, cyber-attack, housing crisis) that pause the game for your decision when you govern; politicians (including you) can be caught in scandals. |
-| **Your career** | Start as one of 10 careers → join a party → campaign → win a seat → climb Backbencher → Shadow → Minister → Treasurer → Leader → **Prime Minister**, unlocking real powers (budget, legislation) as you rise. |
-| **Historical archive** | Every election, law, crisis and scandal is recorded permanently and browsable. |
+| **Your career** | Start as one of 10 careers → join a party → **campaign in a chosen seat** → win it → climb Backbencher → Shadow → Minister → Treasurer → Leader → **Prime Minister**, unlocking real powers (budget, legislation, referendums) as you rise. |
+| **3D presentation** | A **3D perspective parliament chamber** (ideologically-seated hemicycle with the PM and you highlighted) and a **tilted 3D state map**. |
+| **Historical archive** | Every election, law, referendum, crisis and scandal is recorded permanently and browsable. |
 | **Save / load** | Whole-state serialisation to `localStorage`, including RNG state. |
 
 ### How to play
@@ -122,19 +125,21 @@ has a clear home to grow into. Implemented ✓ / planned ○:
 - ✓ National metrics, economy, budget, taxation
 - ✓ Cohort-based population & voter model
 - ✓ Parties, AI politicians (traits/skills/hidden agendas)
-- ✓ Preferential elections + government formation
+- ✓ **Realistic elections** — 151 named seats, preferential counts, 2CP margins, swings, 2PP, pendulum, live election night
+- ✓ **State & territory governments** with premiers and their own election cycles
+- ✓ **Referendums** with the constitutional double-majority rule
 - ✓ Legislative process & repeal
 - ✓ Crises, scandals, historical archive
-- ✓ Player career ladder to PM
-- ○ State & territory governments as full sub-simulations
-- ○ Judicial system, High Court, referendums, constitutional crises
+- ✓ Player career ladder to PM (with seat selection & campaigning)
+- ✓ **3D parliament chamber + tilted 3D map**
+- ○ Judicial system, High Court, constitutional challenges
 - ○ Per-industry economic modelling; energy grid; infrastructure projects
 - ○ Media & social-media dynamics; lobbying groups; civil unrest
 - ○ Foreign relations, defence procurement, intelligence
 - ○ Political dynasties / family trees
 - ○ Individually-simulated citizens at full scale (current model is statistical cohorts)
 - ○ Full world simulation (all nations), additional playable countries
-- ○ Modding, Steam Workshop, multiplayer, richer 3D parliament UI
+- ○ Modding, Steam Workshop, multiplayer
 
 Contributions and forks welcome — the modular `sim/` layout is designed so new
 systems plug into the tick orchestrator without touching the others.

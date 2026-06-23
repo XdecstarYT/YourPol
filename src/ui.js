@@ -5,7 +5,8 @@ import { fmtDate, fmtMoney, fmtPct, round, clamp } from './engine.js';
 import { METRICS, STATES, PARTIES, CAREERS, RANKS, partyById } from './data.js';
 import {
   approval, totalSpend, polById, polName, govLabel, nationalMood,
-  availableActions, currentRankIndex,
+  availableActions, currentRankIndex, buildPendulum, seatStatus,
+  REFERENDUM_CATALOGUE,
 } from './sim/index.js';
 import { POLICY_CATALOGUE } from './sim/legislation.js';
 
@@ -130,127 +131,347 @@ function renderView(state) {
   root.appendChild(fn(state));
 }
 
-// --- Dashboard: interactive state map ---
+// --- Dashboard: 3D tilted state map with state governments ---
 function viewDashboard(state) {
   const wrap = el('div', { class: 'map-wrap' });
-  const grid = el('div', { class: 'map-grid' });
+  const stage = el('div', { class: 'map3d-stage' });
+  const plane = el('div', { class: 'map3d-plane' });
   // crude geographic-ish ordering
   const order = ['NT', 'QLD', 'WA', 'SA', 'NSW', '', 'VIC', 'ACT', 'TAS'];
   for (const code of order) {
-    if (!code) { grid.appendChild(el('div')); continue; }
-    const st = STATES.find((s) => s.code === code);
-    const seats = state.gov.seats;
-    grid.appendChild(stateTile(state, st));
+    if (!code) { plane.appendChild(el('div')); continue; }
+    plane.appendChild(stateTile3D(state, STATES.find((s) => s.code === code)));
   }
-  wrap.appendChild(grid);
+  stage.appendChild(plane);
+  wrap.appendChild(stage);
   return wrap;
 }
-function stateTile(state, st) {
-  // colour by leading party support locally (approx via national support × lean)
-  const lead = [...PARTIES].sort((a, b) =>
-    (state.support[b.id] * (1 + st.lean * (b.econ + b.soc) * 0.4)) -
-    (state.support[a.id] * (1 + st.lean * (a.econ + a.soc) * 0.4)))[0];
-  return el('div', { class: 'state-tile', style: `border-color:${lead.colour}`,
-    onclick: () => stateModal(state, st) },
-    el('div', { class: 'st-name' }, st.code),
-    el('div', { class: 'st-sub' }, `${st.name}`),
-    el('div', { class: 'st-sub' }, `Pop ${st.pop}M · ${st.hor} seats`),
-    el('div', { class: 'st-bar' }, el('div', { class: 'st-fill', style: `width:80%;background:${lead.colour}` })),
-    el('div', { class: 'st-sub' }, `Leaning: ${lead.short}`),
+function stateTile3D(state, st) {
+  const sg = state.stateGovs[st.code];
+  const col = partyById(sg.party).colour;
+  // local two-party-ish support to fill the bar
+  const seats = state.electorates.filter((e) => e.state === st.code);
+  const govSeats = seats.filter((e) => e.held === sg.party).length;
+  const pct = clamp((govSeats / seats.length) * 100, 5, 100);
+  return el('div', { class: 'tile3d', style: `border-top-color:${col}`, onclick: () => stateModal(state, st) },
+    el('div', { class: 't-code' }, st.code),
+    el('div', { class: 't-prem' }, `${sg.title}: ${sg.premier}`),
+    el('div', { class: 't-prem' }, `${partyById(sg.party).short} govt · ${st.hor} fed seats`),
+    el('div', { class: 't-bar' }, el('div', { class: 't-fill', style: `width:${pct}%;background:${col}` })),
   );
 }
 function stateModal(state, st) {
+  const sg = state.stateGovs[st.code];
+  const seats = state.electorates.filter((e) => e.state === st.code);
   const body = el('div', {},
-    el('p', { class: 'muted' }, `Population ${st.pop}M · ${st.hor} House seats · ${st.senate} Senate seats`),
-    el('h3', {}, 'Estimated party support'),
+    el('p', {}, el('b', {}, `${sg.title}: `), sg.premier, ' (', el('span', { class: 'tag', style: `background:${partyById(sg.party).colour}` }, partyById(sg.party).short), ' government)'),
+    el('p', { class: 'muted' }, `Population ${st.pop}M · ${st.hor} House seats · ${st.senate} Senate seats · State approval ${sg.approval}%`),
+    el('p', { class: 'muted' }, `Next state election: ${fmtDate(sg.nextElection)}`),
+    el('h3', {}, `Federal seats held (${seats.length})`),
   );
-  const sorted = [...PARTIES].sort((a, b) => state.support[b.id] - state.support[a.id]);
-  for (const p of sorted) {
-    const v = state.support[p.id] * (1 + st.lean * (p.econ + p.soc) * 0.4);
-    body.appendChild(el('div', { class: 'slider-row' },
-      el('label', {}, el('span', {}, p.short), el('span', {}, fmtPct(v))),
-      el('div', { class: 'm-bar' }, el('div', { class: 'm-fill', style: `width:${clamp(v * 2.5)}%;background:${p.colour}` })),
-    ));
-  }
+  const counts = {};
+  seats.forEach((e) => (counts[e.held] = (counts[e.held] || 0) + 1));
+  const line = el('div', { class: 'gov-line' });
+  [...PARTIES].filter((p) => counts[p.id]).sort((a, b) => counts[b.id] - counts[a.id]).forEach((p) =>
+    line.appendChild(el('span', { class: 'tag', style: `background:${p.colour};margin-right:4px` }, `${p.short} ${counts[p.id]}`)));
+  body.appendChild(line);
+  // marginal seats in this state
+  const marg = seats.filter((e) => e.margin < 6).sort((a, b) => a.margin - b.margin).slice(0, 8);
+  body.appendChild(el('h3', {}, 'Most marginal seats'));
+  marg.forEach((e) => body.appendChild(el('div', { class: 'pend-row' },
+    el('span', {}, el('span', { class: 'pill', style: `background:${partyById(e.held).colour}` }), e.name),
+    el('span', { class: 'mg' }, `${partyById(e.held).short} ${e.margin.toFixed(1)}%`))));
   modal(`${st.name}`, body, [{ label: 'Close', kind: 'secondary' }]);
 }
 
-// --- Parliament: chambers + government ---
+// --- Parliament: 3D hemicycle chamber ---
+let CHAMBER_KEY = 'hor';
 function viewParliament(state) {
-  const pad = el('div', { class: 'view-pad' });
-  pad.appendChild(el('h2', {}, '🏛️ Parliament of Australia'));
+  const wrap = el('div', { class: 'chamber3d-wrap' });
   const pm = state.gov.pm ? polName(state, state.gov.pm) : '—';
-  pad.appendChild(el('p', {},
+  const head = el('div', { class: 'chamber3d-head' });
+  head.appendChild(el('h2', {}, '🏛️ Parliament of Australia'));
+  head.appendChild(el('div', {},
     el('span', { class: 'tag', style: `background:${partyById(state.gov.parties[0]).colour}` }, govLabel(state.gov)),
-    ` government · Prime Minister: `, el('b', {}, pm),
+    ' government · Prime Minister ', el('b', { style: 'color:#fff' }, pm),
     state.gov.majority ? ' (majority)' : ' (minority)'));
+  // chamber toggle
+  const toggle = el('div', { style: 'margin-top:8px;display:flex;gap:6px' });
+  ['hor', 'senate'].forEach((k) => toggle.appendChild(el('button', {
+    class: `btn small ${CHAMBER_KEY === k ? '' : 'secondary'}`,
+    onclick: () => { CHAMBER_KEY = k; render(state); },
+  }, k === 'hor' ? 'House of Reps' : 'Senate')));
+  head.appendChild(toggle);
+  wrap.appendChild(head);
 
-  pad.appendChild(chamber(state, 'House of Representatives', 'hor'));
-  pad.appendChild(chamber(state, 'Senate', 'senate'));
-  return pad;
-}
-function chamber(state, title, key) {
-  const members = state.politicians.filter((p) => p.chamber === key);
+  const members = state.politicians.filter((p) => p.chamber === CHAMBER_KEY);
   const counts = {};
   members.forEach((m) => (counts[m.party] = (counts[m.party] || 0) + 1));
-  const wrap = el('div', { class: 'chamber card' });
-  wrap.appendChild(el('h3', {}, `${title} — ${members.length} seats`));
-  // composition line
-  const line = el('div', { class: 'gov-line' });
-  [...PARTIES].filter((p) => counts[p.id]).sort((a, b) => counts[b.id] - counts[a.id]).forEach((p) => {
-    line.appendChild(el('span', { class: 'tag', style: `background:${p.colour};margin-right:4px` }, `${p.short} ${counts[p.id]}`));
-  });
-  wrap.appendChild(line);
-  // seat dots
-  const seats = el('div', { class: 'seats' });
-  for (const p of [...PARTIES].sort((a, b) => (counts[b.id] || 0) - (counts[a.id] || 0))) {
-    for (let i = 0; i < (counts[p.id] || 0); i++) seats.appendChild(el('div', { class: 'seat', style: `background:${p.colour}`, title: p.short }));
-  }
-  wrap.appendChild(seats);
+  const majNeeded = Math.floor(members.length / 2) + 1;
+  const govSeats = state.gov.parties.reduce((a, p) => a + (counts[p] || 0), 0);
+  wrap.appendChild(el('div', { class: 'majline' },
+    `${members.length} seats · majority needs ${majNeeded} · government holds ${govSeats}`));
+
+  wrap.appendChild(hemicycle(state, members));
+
+  // legend
+  const legend = el('div', { class: 'chamber-legend' });
+  [...PARTIES].filter((p) => counts[p.id]).sort((a, b) => counts[b.id] - counts[a.id]).forEach((p) =>
+    legend.appendChild(el('div', { class: 'lg' },
+      el('span', { class: 'sw', style: `background:${p.colour}` }), `${p.short} ${counts[p.id]}`)));
+  wrap.appendChild(legend);
   return wrap;
 }
 
+// Build a tilted hemicycle of seats, sorted left→right by ideology so the
+// chamber reads like a real seating plan; the PM and the player are highlighted.
+function hemicycle(state, members) {
+  const stage = el('div', { class: 'chamber-stage' });
+  const plane = el('div', { class: 'hemi-plane' });
+  const W = 760, H = 420;
+
+  // sort members by ideology (progressive→conservative)
+  const sorted = [...members].sort((a, b) => (a.econ + a.soc) - (b.econ + b.soc));
+  const N = sorted.length;
+
+  // generate ring slots until we have >= N, then trim
+  const rings = [];
+  let total = 0, ring = 0;
+  const innerR = 70, step = 30;
+  while (total < N && ring < 14) {
+    const r = innerR + ring * step;
+    const circ = Math.PI * r;             // half-circumference
+    const count = Math.max(6, Math.floor(circ / 22));
+    rings.push({ r, count, z: ring * 9 });
+    total += count; ring++;
+  }
+  // collect slots with angle, sort by angle (left to right), then assign members
+  const slots = [];
+  rings.forEach((rg) => {
+    for (let i = 0; i < rg.count; i++) {
+      const ang = Math.PI - (Math.PI * (i + 0.5)) / rg.count; // PI(left)..0(right)
+      slots.push({ ang, r: rg.r, z: rg.z });
+    }
+  });
+  slots.sort((a, b) => b.ang - a.ang);     // left (PI) first
+  // keep N slots spread across the arc
+  const stepKeep = slots.length / N;
+  const chosen = [];
+  for (let i = 0; i < N; i++) chosen.push(slots[Math.floor(i * stepKeep)]);
+
+  chosen.forEach((s, i) => {
+    const m = sorted[i];
+    const p = partyById(m.party);
+    const cx = W / 2 + s.r * Math.cos(s.ang);
+    const cy = H - s.r * Math.sin(s.ang);
+    const cls = 'hemi-seat' + (m.rank === 'pm' ? ' pm' : '') + (m.isPlayer ? ' player' : '');
+    plane.appendChild(el('div', {
+      class: cls,
+      style: `left:${cx}px;top:${cy}px;background:${p.colour};transform:translateZ(${s.z}px)`,
+      title: `${m.name} (${p.short})${m.rank === 'pm' ? ' — PM' : ''}${m.seat?.id ? ' · ' + m.seat.id : ''}`,
+    }));
+  });
+  plane.appendChild(el('div', { class: 'speaker-dais' }, 'Speaker'));
+  stage.appendChild(plane);
+  return stage;
+}
+
 // --- Elections ---
+let ELEC_TAB = 'intention';
 function viewElections(state) {
   const pad = el('div', { class: 'view-pad' });
   pad.appendChild(el('h2', {}, '🗳️ Elections'));
   const ticksTo = state.nextElection - state.tick;
   pad.appendChild(el('p', { class: 'muted' }, `Next federal election: ${fmtDate(state.nextElection)} (${ticksTo} months).`));
 
-  pad.appendChild(el('h3', {}, 'Current voting intention (first preferences)'));
-  const sorted = [...PARTIES].sort((a, b) => state.support[b.id] - state.support[a.id]);
-  for (const p of sorted) {
-    const v = state.support[p.id];
-    pad.appendChild(el('div', { class: 'slider-row' },
-      el('label', {}, el('span', {}, p.name), el('span', {}, fmtPct(v))),
-      el('div', { class: 'm-bar' }, el('div', { class: 'm-fill', style: `width:${clamp(v * 2.2)}%;background:${p.colour}` })),
-    ));
-  }
+  // national 2PP headline
+  const tppAlp = state.tpp ?? 50, tppCoal = 100 - tppAlp;
+  pad.appendChild(el('h3', {}, 'Two-party-preferred (national)'));
+  pad.appendChild(el('div', { class: 'tpp-bar' },
+    el('div', { class: 'seg', style: `width:${tppAlp}%;background:${partyById('alp').colour}` }, `ALP ${tppAlp.toFixed(1)}%`),
+    el('div', { class: 'seg', style: `width:${tppCoal}%;background:${partyById('lib').colour}` }, `L/NP ${tppCoal.toFixed(1)}%`)));
 
-  const last = state._transient?.lastElection;
-  if (last) {
-    pad.appendChild(el('h3', {}, 'Last election result'));
-    pad.appendChild(seatTable(state, last));
-  }
+  // tabs
+  const tabs = el('div', { style: 'margin:12px 0;display:flex;gap:6px;flex-wrap:wrap' });
+  [['intention', 'Voting intention'], ['pendulum', 'Pendulum'], ['results', 'Seat results'], ['referendums', 'Referendums']]
+    .forEach(([k, lbl]) => tabs.appendChild(el('button', {
+      class: `btn small ${ELEC_TAB === k ? '' : 'secondary'}`, onclick: () => { ELEC_TAB = k; render(state); },
+    }, lbl)));
+  pad.appendChild(tabs);
 
-  pad.appendChild(el('div', { class: 'card' },
+  if (ELEC_TAB === 'intention') tabIntention(state, pad);
+  else if (ELEC_TAB === 'pendulum') tabPendulum(state, pad);
+  else if (ELEC_TAB === 'results') tabResults(state, pad);
+  else if (ELEC_TAB === 'referendums') tabReferendums(state, pad);
+
+  pad.appendChild(el('div', { class: 'card', style: 'margin-top:14px' },
     el('div', { class: 'row-between' },
-      el('div', {}, el('b', {}, 'Snap election'), el('div', { class: 'muted' }, 'Call an early election (resets the 3-year clock).')),
+      el('div', {}, el('b', {}, 'Snap election'), el('div', { class: 'muted' }, 'Call an early election (resets the clock).')),
       el('button', { class: 'btn', onclick: () => API.callElection() }, 'Call Election'))));
   return pad;
 }
-function seatTable(state, result) {
-  const t = el('table', { class: 'data' });
-  t.appendChild(el('tr', {}, el('th', {}, 'Party'), el('th', {}, 'House'), el('th', {}, 'Senate'), el('th', {}, 'Vote %')));
-  for (const p of [...PARTIES].sort((a, b) => (result.seats[b.id].hor) - (result.seats[a.id].hor))) {
-    t.appendChild(el('tr', {},
-      el('td', {}, el('span', { class: 'tag', style: `background:${p.colour}` }, p.short)),
-      el('td', {}, String(result.seats[p.id].hor)),
-      el('td', {}, String(result.seats[p.id].senate)),
-      el('td', {}, fmtPct(result.support[p.id]))));
+
+function tabIntention(state, pad) {
+  pad.appendChild(el('h3', {}, 'First preferences'));
+  for (const p of [...PARTIES].sort((a, b) => state.support[b.id] - state.support[a.id])) {
+    const v = state.support[p.id];
+    pad.appendChild(el('div', { class: 'slider-row' },
+      el('label', {}, el('span', {}, p.name), el('span', {}, fmtPct(v))),
+      el('div', { class: 'm-bar' }, el('div', { class: 'm-fill', style: `width:${clamp(v * 2.2)}%;background:${p.colour}` }))));
   }
-  return t;
+  const last = state._transient?.lastElection;
+  if (last) {
+    pad.appendChild(el('h3', {}, 'Last election — seats won'));
+    const t = el('table', { class: 'data' });
+    t.appendChild(el('tr', {}, el('th', {}, 'Party'), el('th', {}, 'House'), el('th', {}, 'Senate'), el('th', {}, 'FP %')));
+    for (const p of [...PARTIES].sort((a, b) => last.seats[b.id].hor - last.seats[a.id].hor)) {
+      t.appendChild(el('tr', {},
+        el('td', {}, el('span', { class: 'tag', style: `background:${p.colour}` }, p.short)),
+        el('td', {}, String(last.seats[p.id].hor)), el('td', {}, String(last.seats[p.id].senate)),
+        el('td', {}, fmtPct(last.support[p.id]))));
+    }
+    pad.appendChild(t);
+  }
 }
+
+function tabPendulum(state, pad) {
+  const pen = buildPendulum(state);
+  pad.appendChild(el('h3', {}, 'The electoral pendulum'));
+  pad.appendChild(el('p', { class: 'muted' }, 'Seats ranked by margin — the ones at the top fall first on a swing.'));
+  const grid = el('div', { class: 'pendulum' });
+  grid.appendChild(pendCol('Government seats', pen.govSide, state));
+  grid.appendChild(pendCol('Opposition & crossbench', pen.oppSide, state));
+  pad.appendChild(grid);
+}
+function pendCol(title, rows, state) {
+  const col = el('div', { class: 'col' });
+  col.appendChild(el('h4', {}, title));
+  rows.slice(0, 30).forEach((r) => {
+    const p = partyById(r.held);
+    col.appendChild(el('div', { class: `pend-row ${r.status === 'marginal' ? 'status-marginal' : ''}` },
+      el('span', {}, el('span', { class: 'pill', style: `background:${p.colour}` }), `${r.name} (${r.state})`),
+      el('span', { class: 'mg' }, `${p.short} ${r.margin.toFixed(1)}%`)));
+  });
+  return col;
+}
+
+let SEAT_FILTER = '';
+function tabResults(state, pad) {
+  pad.appendChild(el('h3', {}, `All 151 divisions`));
+  const search = el('input', { class: 'seat-search', type: 'text', placeholder: 'Search a seat or state…', value: SEAT_FILTER });
+  search.addEventListener('input', () => { SEAT_FILTER = search.value; renderResultsTable(); });
+  pad.appendChild(search);
+  const holder = el('div', {});
+  pad.appendChild(holder);
+  function renderResultsTable() {
+    holder.innerHTML = '';
+    const f = SEAT_FILTER.toLowerCase();
+    const rows = state.electorates
+      .filter((e) => !f || e.name.toLowerCase().includes(f) || e.state.toLowerCase().includes(f))
+      .sort((a, b) => a.margin - b.margin);
+    const t = el('table', { class: 'data' });
+    t.appendChild(el('tr', {}, el('th', {}, 'Seat'), el('th', {}, 'State'), el('th', {}, 'Held by'), el('th', {}, 'Margin'), el('th', {}, 'Status'), el('th', {}, 'Member')));
+    rows.slice(0, 200).forEach((e) => {
+      const p = partyById(e.held);
+      const mp = e.mpId ? polById(state, e.mpId) : null;
+      t.appendChild(el('tr', {},
+        el('td', {}, e.name), el('td', {}, e.state),
+        el('td', {}, el('span', { class: 'tag', style: `background:${p.colour}` }, p.short)),
+        el('td', {}, `${e.margin.toFixed(1)}%`), el('td', {}, seatStatus(e.margin)),
+        el('td', {}, mp ? mp.name + (mp.isPlayer ? ' (you)' : '') : '—')));
+    });
+    holder.appendChild(t);
+  }
+  renderResultsTable();
+}
+
+function tabReferendums(state, pad) {
+  pad.appendChild(el('h3', {}, 'Referendums'));
+  pad.appendChild(el('p', { class: 'muted' }, 'Carried only by a double majority: a national majority AND a majority of states (4 of 6).'));
+  const canCall = API.canLegislate();
+  // active/past
+  for (const r of [...state.referendums].reverse()) {
+    const card = el('div', { class: 'card' });
+    card.appendChild(el('div', { class: 'row-between' },
+      el('div', {}, el('b', {}, r.title), el('div', { class: 'muted' }, r.desc)),
+      el('span', { class: 'tag', style: `background:${r.status === 'passed' ? 'var(--good)' : r.status === 'failed' ? 'var(--bad)' : '#6b7780'}` }, r.status.toUpperCase())));
+    if (r.status === 'pending') card.appendChild(el('div', { class: 'muted' }, `National vote: ${fmtDate(r.voteAt)}`));
+    else card.appendChild(el('div', { class: 'muted' }, `${r.nationalYes.toFixed(1)}% Yes · ${r.statesCarried}/6 states`));
+    pad.appendChild(card);
+  }
+  if (canCall) {
+    pad.appendChild(el('h3', {}, 'Call a referendum'));
+    const grid = el('div', { class: 'grid2' });
+    for (const tpl of REFERENDUM_CATALOGUE) {
+      const pending = state.referendums.some((r) => r.refId === tpl.id && r.status === 'pending');
+      grid.appendChild(el('div', { class: 'card' },
+        el('b', {}, tpl.title), el('div', { class: 'muted' }, tpl.desc),
+        el('button', { class: 'btn small', disabled: pending || null, onclick: () => API.proposeReferendum(tpl.id) },
+          pending ? 'Vote pending' : 'Call referendum')));
+    }
+    pad.appendChild(grid);
+  } else {
+    pad.appendChild(el('p', { class: 'muted' }, 'Only the government (Minister/PM) can call a referendum.'));
+  }
+}
+
+/* ---------------------------------------------------- live election night */
+export function showElectionNight(state, result, onDone) {
+  const total = result.seatResults.length;
+  const majority = Math.floor(total / 2) + 1;
+  const body = el('div', { class: 'enight' });
+  const tally = { num: el('div', {}), seg: el('div', { class: 'tpp-bar' }), counted: el('div', { class: 'counted' }), feed: el('div', { class: 'seat-feed' }) };
+
+  const head = el('div', { class: 'tally-big' });
+  const govBox = el('div', { class: 'side' });
+  const oppBox = el('div', { class: 'side', style: 'text-align:right' });
+  const govNum = el('div', { class: 'num', style: `color:${partyById('alp').colour}` }, '0');
+  const oppNum = el('div', { class: 'num', style: `color:${partyById('lib').colour}` }, '0');
+  govBox.appendChild(govNum); govBox.appendChild(el('div', { class: 'lbl' }, 'Labor + allies'));
+  oppBox.appendChild(oppNum); oppBox.appendChild(el('div', { class: 'lbl' }, 'Coalition + others'));
+  head.appendChild(govBox); head.appendChild(el('div', { style: 'align-self:center;opacity:.6' }, `${majority} for majority`)); head.appendChild(oppBox);
+  body.appendChild(head);
+  body.appendChild(tally.seg);
+  body.appendChild(tally.counted);
+  body.appendChild(tally.feed);
+
+  $('#modal-title').textContent = '🗳️ Election Night — Live Count';
+  const mb = $('#modal-body'); mb.innerHTML = ''; mb.appendChild(body);
+  const ma = $('#modal-actions'); ma.innerHTML = '';
+  $('#modal-host').classList.remove('hidden');
+
+  // reveal seats progressively in "report order"
+  const order = [...result.seatResults].sort((a, b) => a.reportOrder - b.reportOrder);
+  let i = 0;
+  const counts = {}; PARTIES.forEach((p) => (counts[p.id] = 0));
+  const isLeft = (id) => id === 'alp' || id === 'grn' || id === 'tea';
+  const timer = setInterval(() => {
+    const batch = Math.max(1, Math.round(total / 40));
+    for (let b = 0; b < batch && i < order.length; b++, i++) {
+      const s = order[i];
+      counts[s.held]++;
+      const p = partyById(s.held);
+      const row = el('div', { class: 'fr' },
+        el('span', {}, `${s.name} (${s.state})`),
+        el('span', { class: s.gain ? 'gain' : '' }, `${p.short}${s.gain ? ' GAIN' : ''} · swing ${s.swing >= 0 ? '+' : ''}${s.swing.toFixed(1)}`));
+      tally.feed.prepend(row);
+    }
+    const left = sum2(counts, isLeft), right = i - left;
+    govNum.textContent = String(left); oppNum.textContent = String(right);
+    const lp = (left / Math.max(1, i)) * 100;
+    tally.seg.innerHTML = '';
+    tally.seg.appendChild(el('div', { class: 'seg', style: `width:${lp}%;background:${partyById('alp').colour}` }, left));
+    tally.seg.appendChild(el('div', { class: 'seg', style: `width:${100 - lp}%;background:${partyById('lib').colour}` }, right));
+    tally.counted.textContent = `${i} of ${total} seats counted (${Math.round((i / total) * 100)}%)`;
+    if (i >= order.length) {
+      clearInterval(timer);
+      const pm = state.gov.pm ? polName(state, state.gov.pm) : 'a hung parliament';
+      tally.counted.textContent = `Count complete. ${govLabel(state.gov)} ${state.gov.majority ? 'wins majority government' : 'forms minority government'} — ${pm} to be PM.`;
+      ma.appendChild(el('button', { class: 'btn', onclick: () => { closeModal(); onDone?.(); } }, 'Continue'));
+    }
+  }, 140);
+}
+function sum2(counts, pred) { let n = 0; for (const k in counts) if (pred(k)) n += counts[k]; return n; }
 
 // --- Legislation ---
 function viewLegislation(state) {
@@ -426,6 +647,25 @@ function onCareerAction(state, id) {
     modal('Join a Party', body, [
       { label: 'Cancel', kind: 'secondary' },
       { label: 'Join', run: () => API.careerAction('join_party', { partyId: chosenParty, homeState: chosenState }) },
+    ]);
+    return;
+  }
+  if (id === 'run') {
+    const pl = state.player;
+    const seats = state.electorates.filter((e) => e.state === (pl.homeState || 'NSW')).sort((a, b) => a.margin - b.margin);
+    let chosen = seats[0]?.name;
+    const body = el('div', {});
+    body.appendChild(el('p', { class: 'muted' }, `Choose a seat to contest in ${pl.homeState || 'your state'}. Marginal seats are easier to flip; safe seats held by rivals are hard.`));
+    const sel = el('select', { style: 'width:100%;padding:6px' });
+    seats.forEach((e) => {
+      const p = partyById(e.held);
+      sel.appendChild(el('option', { value: e.name }, `${e.name} — ${p.short} ${e.margin.toFixed(1)}% (${seatStatus(e.margin)})`));
+    });
+    sel.addEventListener('change', () => (chosen = sel.value));
+    body.appendChild(sel);
+    modal('Stand for Election', body, [
+      { label: 'Cancel', kind: 'secondary' },
+      { label: 'Nominate', run: () => API.careerAction('run', { electorate: chosen }) },
     ]);
     return;
   }

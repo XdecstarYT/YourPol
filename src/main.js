@@ -7,7 +7,8 @@ import { makeBill, advanceBill, repealLaw } from './sim/legislation.js';
 import { runElection } from './sim/elections.js';
 import { resolveEvent, playerGoverns } from './sim/events.js';
 import { runAction } from './sim/career.js';
-import { initUI, render, showNewGameDialog, closeModal, modal } from './ui.js';
+import { proposeReferendum } from './sim/referendum.js';
+import { initUI, render, showNewGameDialog, closeModal, modal, showElectionNight } from './ui.js';
 
 let state = null;
 let timer = null;
@@ -33,19 +34,7 @@ function stepOnce() {
 
 function onElection(result) {
   state.paused = true; stopLoop();
-  // build a brief result summary modal
-  const lines = [];
-  const top = Object.entries(result.seats).sort((a, b) => b[1].hor - a[1].hor).slice(0, 4);
-  const div = document.createElement('div');
-  div.innerHTML = `<p class="muted">The nation has voted.</p>`;
-  top.forEach(([id, s]) => {
-    const p = state.support[id];
-    const line = document.createElement('div');
-    line.className = 'muted';
-    line.textContent = `${id.toUpperCase()}: ${s.hor} House, ${s.senate} Senate (${p.toFixed(1)}%)`;
-    div.appendChild(line);
-  });
-  modal('🗳️ Federal Election Result', div, [{ label: 'Continue', run: () => { render(state); } }]);
+  showElectionNight(state, result, () => render(state));
 }
 
 /* ------------------------------------------------------------------ api */
@@ -88,6 +77,7 @@ const api = {
     render(state);
   },
   repeal(lawId) { if (api.canLegislate()) repealLaw(state, lawId); render(state); },
+  proposeReferendum(refId) { if (api.canLegislate()) proposeReferendum(state, refId); render(state); },
 
   // budget ----------------------------------------------------------------
   setSpend(cat, val) { if (api.canLegislate()) state.budget.spend[cat] = clamp(val, 0, 1000); render(state); },

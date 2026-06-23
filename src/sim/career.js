@@ -64,7 +64,8 @@ export function runAction(state, actionId, payload = {}) {
     case 'campaign':
       pl.influence -= 1;
       pl.reputation = clamp(pl.reputation + rng.range(2, 6));
-      msg = `You campaign hard. Reputation now ${Math.round(pl.reputation)}.`;
+      if (pl.electorate) pl.campaignedSeat = pl.electorate;  // boosts that seat at the ballot
+      msg = `You campaign hard${pl.electorate ? ' in ' + pl.electorate : ''}. Reputation now ${Math.round(pl.reputation)}.`;
       break;
 
     case 'fundraise':
@@ -74,7 +75,8 @@ export function runAction(state, actionId, payload = {}) {
 
     case 'run':
       pl.running = true;
-      msg = `You are nominated to contest the next federal election.`;
+      if (payload.electorate) pl.electorate = payload.electorate;
+      msg = `You are nominated to contest ${pl.electorate || 'your home seat'} at the next federal election.`;
       break;
 
     case 'media':

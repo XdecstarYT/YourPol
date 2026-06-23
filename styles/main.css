@@ -220,3 +220,93 @@ input[type=range] { width: 100%; }
 .spacer { flex:1 1 auto; }
 ::-webkit-scrollbar { width:9px; height:9px; }
 ::-webkit-scrollbar-thumb { background:var(--chrome-darker); border-radius:5px; }
+
+/* ============================================================
+   3D parliament chamber (CSS perspective hemicycle)
+   ============================================================ */
+.chamber3d-wrap {
+  height: 100%; display: flex; flex-direction: column;
+  background: radial-gradient(circle at 50% 20%, #3a4a63, #1d2533);
+  color: #e8edf1; overflow: hidden;
+}
+.chamber3d-head { padding: 12px 16px; flex: 0 0 auto; }
+.chamber3d-head h2 { margin: 0 0 4px; color: #fff; }
+.chamber3d-head .muted { color: #aab6c4; }
+.chamber-stage {
+  flex: 1 1 auto; position: relative;
+  perspective: 1300px; perspective-origin: 50% 38%;
+  overflow: hidden;
+}
+.hemi-plane {
+  position: absolute; left: 50%; bottom: 8%;
+  width: 760px; height: 420px; margin-left: -380px;
+  transform: rotateX(58deg); transform-style: preserve-3d;
+}
+.hemi-seat {
+  position: absolute; width: 13px; height: 13px; border-radius: 3px;
+  box-shadow: 0 2px 2px rgba(0,0,0,.45);
+  transform-style: preserve-3d; transition: transform .2s;
+}
+.hemi-seat.pm { width: 17px; height: 17px; box-shadow: 0 0 0 2px #ffd54a, 0 3px 4px rgba(0,0,0,.5); z-index: 5; }
+.hemi-seat.player { box-shadow: 0 0 0 2px #fff, 0 3px 4px rgba(0,0,0,.5); }
+.speaker-dais {
+  position: absolute; left: 50%; bottom: 2%; width: 90px; height: 26px;
+  margin-left: -45px; background: linear-gradient(#6b4a2a,#4a3018);
+  border-radius: 6px 6px 2px 2px; transform: translateZ(34px);
+  box-shadow: 0 6px 10px rgba(0,0,0,.5); display:flex; align-items:center;
+  justify-content:center; font-size:11px; color:#f0e2c8;
+}
+.chamber-legend { padding: 8px 16px 14px; display:flex; flex-wrap:wrap; gap:10px; flex:0 0 auto; }
+.chamber-legend .lg { display:flex; align-items:center; gap:5px; font-size:12px; }
+.chamber-legend .sw { width:12px; height:12px; border-radius:3px; }
+.majline { font-size:12px; color:#cdd7e2; padding:0 16px 8px; }
+
+/* ============================================================
+   3D tilted state map
+   ============================================================ */
+.map3d-stage {
+  flex: 1 1 auto; perspective: 1200px; perspective-origin: 50% 30%;
+  display:flex; align-items:center; justify-content:center; overflow:hidden;
+}
+.map3d-plane {
+  transform: rotateX(46deg) rotateZ(0deg); transform-style: preserve-3d;
+  display: grid; gap: 12px; padding: 18px;
+  grid-template-columns: repeat(3, 150px); grid-auto-rows: 88px;
+}
+.tile3d {
+  background: rgba(255,255,255,.92); border-radius: 8px; padding: 8px 10px;
+  cursor: pointer; transform-style: preserve-3d; transition: transform .15s;
+  box-shadow: 0 10px 16px rgba(0,0,0,.35); border-top: 4px solid #888;
+}
+.tile3d:hover { transform: translateZ(26px); }
+.tile3d .t-code { font-weight: 800; font-size: 16px; }
+.tile3d .t-prem { font-size: 10px; color: var(--ink-soft); }
+.tile3d .t-bar { height: 5px; border-radius: 3px; margin-top: 5px; background:#e2e7ea; overflow:hidden; }
+.tile3d .t-fill { height:100%; }
+
+/* ============================================================
+   Election night + pendulum + results
+   ============================================================ */
+.enight { color:#e8edf1; }
+.enight .tally-big { display:flex; gap:18px; align-items:flex-end; margin:6px 0 12px; }
+.enight .side { flex:1; }
+.enight .side .num { font-size:34px; font-weight:800; line-height:1; }
+.enight .side .lbl { font-size:12px; opacity:.8; }
+.tpp-bar { height:26px; border-radius:5px; overflow:hidden; display:flex; font-size:12px; font-weight:700; color:#fff; }
+.tpp-bar .seg { display:flex; align-items:center; justify-content:center; transition:width .3s; white-space:nowrap; }
+.majority-mark { position:relative; height:8px; }
+.majority-mark::after { content:''; position:absolute; left:50%; top:-30px; height:30px; width:2px; background:#fff; }
+.seat-feed { max-height:170px; overflow-y:auto; margin-top:10px; font-size:12px; }
+.seat-feed .fr { padding:3px 6px; border-bottom:1px solid rgba(255,255,255,.12); display:flex; justify-content:space-between; }
+.gain { color:#ffd54a; font-weight:700; }
+.counted { font-size:12px; opacity:.85; margin-top:4px; }
+
+.pendulum { display:grid; grid-template-columns:1fr 1fr; gap:14px; }
+.pendulum .col h4 { margin:4px 0; }
+.pend-row { display:flex; justify-content:space-between; font-size:12px; padding:2px 6px; border-radius:4px; }
+.pend-row .mg { font-variant-numeric:tabular-nums; }
+.pill { display:inline-block; width:9px; height:9px; border-radius:2px; margin-right:5px; }
+.status-marginal { background:#fff3cd; }
+.status-marginal.dark { background:rgba(224,168,58,.25); }
+
+.seat-search { padding:6px; width:100%; margin:6px 0; border:1px solid var(--line); border-radius:6px; }
